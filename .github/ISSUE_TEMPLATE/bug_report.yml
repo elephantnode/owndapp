@@ -1,0 +1,100 @@
+name: 不具合の報告
+description: owndappが期待どおりに動かない場合に報告してください。
+title: "[不具合] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        報告ありがとうございます。
+
+        - **脆弱性など、セキュリティ上の問題はここに書かないでください。** [SECURITY.md](https://github.com/elephantnode/owndapp/security/policy)の手順で報告してください。
+        - 実際のプロジェクトのパス、カタログ（`.owndapp/`・`catalog.sqlite`）、`.env`、トークンやパスワードなどの認証情報、個人情報は添付しないでください。ログやスクリーンショットも、該当部分を伏せてから貼ってください。
+        - 可能であれば、サンプルのプロジェクトで再現する最小の手順を書いてください。
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: OS
+      description: Windowsは試験的な対応で、実機での動作は未検証です。
+      options:
+        - macOS
+        - Windows（試験的・実機未検証）
+        - その他
+    validations:
+      required: true
+
+  - type: input
+    id: os-version
+    attributes:
+      label: OSの版
+      placeholder: "例: macOS 26.1 / Windows 11 24H2"
+    validations:
+      required: true
+
+  - type: input
+    id: node-version
+    attributes:
+      label: Node.jsの版
+      description: "`node --version` の結果"
+      placeholder: "例: v24.14.0"
+    validations:
+      required: true
+
+  - type: input
+    id: owndapp-version
+    attributes:
+      label: owndappの版またはcommit
+      description: "`package.json` の version、またはgitのcommit（`git rev-parse --short HEAD`）"
+      placeholder: "例: 0.1.0 / ffb3b44"
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 再現手順
+      description: 操作した画面・ボタン・入力を順に書いてください。
+      placeholder: |
+        1. 「アプリを追加」でサンプルフォルダを指定
+        2. 候補を選んで「選択した候補を登録」
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期待した動作
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: 実際の動作
+      description: 表示されたエラーメッセージなども書いてください。
+    validations:
+      required: true
+
+  - type: textarea
+    id: sample
+    attributes:
+      label: 最小の再現例（任意）
+      description: 再現に必要な最小のファイル構成やlockファイルの断片など。実際のプロジェクトではなく、サンプルで再現できるものをお願いします。
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: ログ（任意）
+      description: ターミナルやブラウザのコンソールの出力。パス・ユーザー名・認証情報などは伏せてから貼ってください。
+      render: text
+
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: 確認
+      options:
+        - label: セキュリティ上の問題（脆弱性）の報告ではありません。
+          required: true
+        - label: 実際のプロジェクトのパス・DB・.env・認証情報・個人情報を含めていません（または伏せました）。
+          required: true

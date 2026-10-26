@@ -1,0 +1,52 @@
+{
+  "name": "owndapp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.14.0"
+  },
+  "dependencies": {
+    "@hono/node-server": "2.1.5",
+    "class-variance-authority": "0.7.1",
+    "clsx": "2.1.1",
+    "hono": "4.13.13",
+    "lucide-react": "1.31.0",
+    "radix-ui": "1.6.7",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "smol-toml": "1.9.1",
+    "tailwind-merge": "3.7.0",
+    "yaml": "2.9.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@tailwindcss/vite": "4.3.3",
+    "@types/node": "24.13.0",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "tailwindcss": "4.3.3",
+    "tsx": "4.23.15",
+    "typescript": "6.0.3",
+    "vite": "8.3.4"
+  },
+  "scripts": {
+    "dev": "node tools/doctor.mjs --development && tsx watch server/index.ts",
+    "start": "node tools/doctor.mjs && tsx server/index.ts --production",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test tests/*.test.ts tests/*.test.mjs",
+    "test:e2e": "playwright test",
+    "doctor": "node tools/doctor.mjs"
+  },
+  "description": "Local project catalog and dependency vulnerability management",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/elephantnode/owndapp.git"
+  },
+  "homepage": "https://github.com/elephantnode/owndapp#readme",
+  "bugs": {
+    "url": "https://github.com/elephantnode/owndapp/issues"
+  }
+}

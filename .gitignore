@@ -1,0 +1,19 @@
+node_modules/
+dist/
+.owndapp/
+playwright-report/
+test-results/
+*.tsbuildinfo
+.DS_Store
+
+# Original npm configuration may contain credentials
+.npmrc.owndapp-backup-*
+
+# Local credentials and runtime records
+.env
+.env.*
+!.env.example
+*.log
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm

@@ -1,0 +1,50 @@
+name: 機能の要望
+description: 新しい機能や改善を提案してください。
+title: "[要望] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        提案ありがとうございます。
+
+        - **セキュリティ上の問題（脆弱性）はここに書かないでください。** [SECURITY.md](https://github.com/elephantnode/owndapp/security/policy)の手順で報告してください。
+        - 依存パッケージの自動更新・自動修正や、登録したアプリのソースを自動で変更する機能は対象範囲外です。
+        - 既存の課題は[開発課題](https://github.com/elephantnode/owndapp/blob/main/docs/roadmap.md)も確認してください。
+        - 実際のプロジェクトのパス・DB・`.env`・認証情報・個人情報は書かないでください。
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: 困っていること・目的
+      description: どんな場面で、何ができずに困っているかを書いてください。
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 提案する内容
+      description: こう動くとよい、という案があれば書いてください。
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 検討した代替案・回避策（任意）
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: 主に使うOS（任意）
+      options:
+        - macOS
+        - Windows（試験的・実機未検証）
+        - 両方
+        - その他
+
+  - type: textarea
+    id: context
+    attributes:
+      label: 補足（任意）
+      description: 対象となる依存形式（lockファイルの種類など）や、参考になる資料があれば書いてください。

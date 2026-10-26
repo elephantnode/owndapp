@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos:
+    name: macOS / Node 24
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Audit the lockfile before downloading packages
+        run: npm audit --package-lock-only --audit-level=high
+      - name: Install without lifecycle scripts
+        run: npm ci --ignore-scripts --include=dev
+      - name: Verify package signatures
+        run: npm audit signatures
+      - name: Unit and API tests
+        run: npm test
+      - name: Typecheck and production build
+        run: npm run build
+      - name: Browser tests with the runner's Chrome
+        run: npm run test:e2e
+
+  windows-smoke:
+    name: Windows experimental / Node 24
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Audit the lockfile before downloading packages
+        run: npm.cmd audit --package-lock-only --audit-level=high
+      - name: Install without lifecycle scripts
+        run: npm.cmd ci --ignore-scripts --include=dev
+      - name: Verify package signatures
+        run: npm.cmd audit signatures
+      - name: Typecheck and production build
+        run: npm.cmd run build
+      - name: Check the prepared runtime
+        run: npm.cmd run doctor
+      - name: Windows paths and local API smoke tests
+        run: node --import tsx --test tests/windows.test.ts tests/catalog-tree.test.ts tests/cargo-locks.test.ts

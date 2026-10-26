@@ -1,0 +1,55 @@
+:root {
+  color-scheme: light;
+  --gray-0: oklch(100% 0 160);
+  --gray-50: oklch(98.3% .004 160);
+  --gray-100: oklch(96.5% .006 160);
+  --gray-200: oklch(91% .009 160);
+  --gray-300: oklch(83% .012 160);
+  --gray-500: oklch(55% .015 160);
+  --gray-600: oklch(46% .015 160);
+  --gray-800: oklch(28% .016 160);
+  --gray-900: oklch(22% .015 160);
+  --gray-950: oklch(16% .012 160);
+  --green-50: oklch(96% .025 160);
+  --green-100: oklch(92% .045 160);
+  --green-500: oklch(47% .09 160);
+  --green-600: oklch(40% .08 160);
+  --green-700: oklch(34% .07 160);
+  --amber-50: oklch(97% .025 75);
+  --amber-700: oklch(43% .1 70);
+  --red-50: oklch(97% .016 25);
+  --red-700: oklch(44% .14 25);
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px;
+  --space-6: 24px; --space-8: 32px; --space-12: 48px;
+  --font-xs: 12px; --font-sm: 14px; --font-base: 16px; --font-lg: 20px; --font-xl: 28px; --font-display: 36px;
+  --font-ui: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'Hiragino Sans', 'Yu Gothic UI', sans-serif;
+  --font-code: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --radius-input: 6px; --radius-panel: 10px; --radius-dialog: 14px;
+  --shadow-panel: 0 2px 4px oklch(20% .01 160 / .04), 0 16px 48px oklch(20% .01 160 / .09);
+  --duration-fast: 120ms; --ease: ease-out;
+  --z-base: 0; --z-sticky: 10; --z-dialog: 20;
+  --surface-canvas: var(--gray-0); --surface-raised: var(--gray-50); --surface-overlay: var(--gray-0);
+  --surface-sunken: var(--gray-100); --surface-inverse: var(--gray-900);
+  --text-primary: var(--gray-900); --text-secondary: var(--gray-600); --text-muted: var(--gray-500);
+  --border-default: var(--gray-200); --border-strong: var(--gray-300);
+  --accent-bg: var(--green-600); --accent-hover: var(--green-700); --accent-text: var(--green-600);
+  --accent-subtle: var(--green-50); --text-on-accent: var(--gray-0);
+  --warning-bg: var(--amber-50); --warning-text: var(--amber-700);
+  --error-bg: var(--red-50); --error-text: var(--red-700);
+  --success-bg: var(--green-50); --success-text: var(--green-600);
+  --button-radius: var(--radius-input); --input-bg: var(--surface-canvas);
+  --table-hover: var(--surface-raised); --nav-active: var(--accent-subtle);
+}
+[data-theme='dark'] {
+  color-scheme: dark;
+  --surface-canvas: var(--gray-950); --surface-raised: var(--gray-900); --surface-overlay: var(--gray-800);
+  --surface-sunken: oklch(13% .01 160); --surface-inverse: var(--gray-50);
+  --text-primary: var(--gray-100); --text-secondary: var(--gray-300); --text-muted: oklch(74% .01 160);
+  --border-default: oklch(32% .015 160); --border-strong: var(--gray-500);
+  --accent-bg: oklch(60% .08 160); --accent-hover: oklch(67% .08 160); --accent-text: oklch(76% .08 160);
+  --accent-subtle: oklch(24% .025 160); --text-on-accent: var(--gray-950);
+  --warning-bg: oklch(25% .025 75); --warning-text: oklch(80% .09 75);
+  --error-bg: oklch(25% .025 25); --error-text: oklch(80% .08 25);
+  --success-bg: var(--accent-subtle); --success-text: var(--accent-text);
+  --shadow-panel: 0 0 0 1px var(--border-default), 0 20px 48px oklch(0% 0 0 / .3);
+}
