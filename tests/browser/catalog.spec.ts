@@ -3,6 +3,8 @@ import { mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from
 import { join } from 'node:path';
 
 test('探索・追加・検索・編集・アーカイブ・復帰と狭い画面', async ({ page }) => {
+  // The longest scenario; slower CI runners need more than the default 30 seconds.
+  test.slow();
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.goto('/');
@@ -42,7 +44,7 @@ test('探索・追加・検索・編集・アーカイブ・復帰と狭い画�
   await page.getByRole('button', { name: '選択した候補を登録' }).click();
   await expect(page.getByText('今回追加したアプリを表示しています')).toBeVisible();
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  await expect(page.getByRole('status')).toContainText('依存情報は自動で読み取ります');
+  await expect(page.getByRole('status').filter({ hasText: '依存情報は自動で読み取ります' })).toBeVisible();
   // The purpose comes from the README's first paragraph, once the background reading has finished.
   await expect(page.getByText('社内のお知らせと予定をまとめて表示するポータル。')).toBeVisible();
   await page.getByRole('link', { name: 'personal-portal', exact: true }).click();
@@ -79,9 +81,9 @@ test('探索・追加・検索・編集・アーカイブ・復帰と狭い画�
   await page.getByLabel('管理状態', { exact: true }).selectOption('maintained');
   await page.getByRole('textbox', { name: 'タグ', exact: true }).fill('個人開発, 写真');
   await page.getByRole('button', { name: '変更を保存' }).click();
-  await expect(page.getByRole('status')).toContainText('保存しました');
+  await expect(page.getByRole('status').filter({ hasText: '保存しました' })).toBeVisible();
   // The save toast is shown where the save button was pressed, not only at the top of the page.
-  await expect(page.getByRole('status')).toBeInViewport();
+  await expect(page.getByRole('status').filter({ hasText: '保存しました' })).toBeInViewport();
   await page.screenshot({ path: 'docs/screenshots/detail-saved.png', animations: 'disabled' });
   await page.getByRole('button', { name: '一覧に戻る' }).click();
   await page.getByRole('textbox', { name: 'アプリを検索' }).fill('写真');
@@ -102,7 +104,7 @@ test('探索・追加・検索・編集・アーカイブ・復帰と狭い画�
   await page.getByRole('checkbox', { name: 'アーカイブする' }).scrollIntoViewIfNeeded();
   await page.screenshot({ path: 'docs/screenshots/detail-archive.png', animations: 'disabled' });
   await page.getByRole('button', { name: '変更を保存' }).click();
-  await expect(page.getByRole('status')).toContainText('保存しました');
+  await expect(page.getByRole('status').filter({ hasText: '保存しました' })).toBeVisible();
   await page.getByRole('navigation', { name: 'メインメニュー' }).getByRole('link', { name: '登録したアプリ', exact: true }).click();
   await page.getByRole('link', { name: 'アーカイブ', exact: true }).click();
   await expect(page.getByRole('link', { name: 'photo-notes', exact: true })).toBeVisible();
@@ -112,13 +114,13 @@ test('探索・追加・検索・編集・アーカイブ・復帰と狭い画�
   await expect(page.getByLabel('管理状態', { exact: true })).toHaveValue('maintained');
   await page.getByLabel('管理状態', { exact: true }).selectOption('on_hold');
   await page.getByRole('button', { name: '変更を保存' }).click();
-  await expect(page.getByRole('status')).toContainText('保存しました');
+  await expect(page.getByRole('status').filter({ hasText: '保存しました' })).toBeVisible();
   await page.getByRole('link', { name: '登録したアプリ', exact: true }).click();
   await page.getByRole('checkbox', { name: 'このページをすべて選択' }).check();
   await page.getByRole('button', { name: 'タグを追加', exact: true }).click();
   await page.getByRole('dialog').getByRole('textbox', { name: 'タグ' }).fill('確認対象');
   await page.getByRole('dialog').getByRole('button', { name: 'タグを追加', exact: true }).click();
-  await expect(page.getByRole('status')).toContainText('タグを追加しました');
+  await expect(page.getByRole('status').filter({ hasText: 'タグを追加しました' })).toBeVisible();
   await page.getByRole('button', { name: '選択解除' }).click();
   await page.getByRole('checkbox', { name: 'personal-portalを選択' }).check();
   await page.getByRole('checkbox', { name: 'image-workerを選択' }).check();
@@ -130,7 +132,7 @@ test('探索・追加・検索・編集・アーカイブ・復帰と狭い画�
   await expect(page.getByRole('dialog').getByRole('textbox', { name: 'アーカイブの理由（任意）' })).not.toHaveAttribute('required');
   await page.getByRole('dialog').getByLabel('変更後の管理状態').selectOption('active');
   await page.getByRole('dialog').getByRole('button', { name: '2件を変更' }).click();
-  await expect(page.getByRole('status')).toContainText('2件の管理状態を「開発中」にしました');
+  await expect(page.getByRole('status').filter({ hasText: '2件の管理状態を「開発中」にしました' })).toBeVisible();
   await expect(page.getByRole('table').getByText('開発中', { exact: true })).toHaveCount(2);
   await page.getByRole('button', { name: '通知を閉じる' }).click();
   await page.evaluate(() => { (document.activeElement as HTMLElement)?.blur(); window.scrollTo(0, 0); });
@@ -178,7 +180,7 @@ test('探索・追加・検索・編集・アーカイブ・復帰と狭い画�
   renameSync(join(process.env.OWNDAPP_TEST_ROOT!, 'log-tool'), join(process.env.OWNDAPP_TEST_ROOT!, 'log-tool-moved'));
   await page.getByRole('link', { name: '登録したアプリ', exact: true }).click();
   await page.getByRole('button', { name: '存在を再確認' }).click();
-  await expect(page.getByRole('status')).toContainText('見つからないアプリが1件');
+  await expect(page.getByRole('status').filter({ hasText: '見つからないアプリが1件' })).toBeVisible();
   await expect(page.getByText('フォルダが見つかりません', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'example.com/log-toolをFinderで表示' })).toBeDisabled();
   // 脆弱性と対応 lists it under its own kind, with the same list/tree switch as the catalog.
@@ -196,7 +198,7 @@ test('探索・追加・検索・編集・アーカイブ・復帰と狭い画�
   await page.getByRole('button', { name: 'カタログから外す…' }).click();
   await expect(page.getByRole('dialog')).toContainText('example.com/log-tool');
   await page.getByRole('dialog').getByRole('button', { name: '1件を外す' }).click();
-  await expect(page.getByRole('status')).toContainText('1件をカタログから外しました');
+  await expect(page.getByRole('status').filter({ hasText: '1件をカタログから外しました' })).toBeVisible();
   await expect(page.getByRole('link', { name: 'example.com/log-tool', exact: true })).toHaveCount(0);
   await expect(page.getByRole('link', { name: 'photo-notes', exact: true })).toBeVisible();
   // Excluding a candidate's folder hides it from the current result at once and lists it as an exclusion.
@@ -225,7 +227,7 @@ test('探索・追加・検索・編集・アーカイブ・復帰と狭い画�
   await page.getByRole('button', { name: 'カタログから外す…' }).click();
   await expect(page.getByRole('dialog')).toContainText('除外設定のフォルダにあるアプリ');
   await page.getByRole('dialog').getByRole('button', { name: '1件を外す' }).click();
-  await expect(page.getByRole('status')).toContainText('1件をカタログから外しました');
+  await expect(page.getByRole('status').filter({ hasText: '1件をカタログから外しました' })).toBeVisible();
   await expect(page.getByRole('link', { name: 'image-worker', exact: true })).toHaveCount(0);
   await expect(page.getByRole('link', { name: 'photo-notes', exact: true })).toBeVisible();
   // Register an editor in settings, then open a project with it from the list and the detail page.
@@ -252,12 +254,12 @@ test('探索・追加・検索・編集・アーカイブ・復帰と狭い画�
   await page.getByRole('link', { name: '依存検索', exact: true }).click();
   await expect(page.getByText(/依存の読み取りを実施 2件 \/ 登録 2件/)).toBeVisible();
   await page.getByRole('button', { name: /アーカイブ以外をすべて読み取る（2件）/ }).click();
-  await expect(page.getByRole('status')).toContainText('アーカイブ以外の2件の依存情報を読み取ります');
+  await expect(page.getByRole('status').filter({ hasText: 'アーカイブ以外の2件の依存情報を読み取ります' })).toBeVisible();
   await expect(page.getByRole('button', { name: /アーカイブ以外をすべて読み取る/ })).toBeEnabled();
   await page.getByRole('link', { name: '登録したアプリ', exact: true }).click();
   await page.getByRole('checkbox', { name: 'photo-notesを選択' }).check();
   await page.getByRole('button', { name: '依存情報を読む' }).click();
-  await expect(page.getByRole('status')).toContainText('1件の依存情報を読み取りました（完了1件）');
+  await expect(page.getByRole('status').filter({ hasText: '1件の依存情報を読み取りました（完了1件）' })).toBeVisible();
   await page.getByRole('navigation', { name: 'メインメニュー' }).getByRole('link', { name: '登録したアプリ', exact: true }).click();
   await page.getByRole('link', { name: '依存検索', exact: true }).click();
   await page.getByLabel('パッケージ名').fill('vue');
@@ -302,7 +304,7 @@ test('探索・追加・検索・編集・アーカイブ・復帰と狭い画�
   await page.screenshot({ path: 'docs/screenshots/vulnerability-confirm.png', animations: 'disabled' });
   await expect(confirm).toContainText('裏側で進め、画面上部に進み具合を出します');
   await confirm.getByRole('button', { name: '1件を照会' }).click();
-  await expect(page.getByRole('status')).toContainText('既知の脆弱性があるアプリは1件です');
+  await expect(page.getByRole('status').filter({ hasText: '既知の脆弱性があるアプリは1件です' })).toBeVisible();
   // The right column summarises by dependency; every advisory is listed in the wide column.
   const found = page.getByRole('region', { name: '既知の脆弱性 1件' });
   await expect(found).toContainText('@vue/shared@3.5.13');
@@ -348,7 +350,7 @@ test('探索・追加・検索・編集・アーカイブ・復帰と狭い画�
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(queue).toContainText('優先度中 1');
   await page.getByRole('combobox', { name: 'photo-notesの公開状況' }).selectOption('local');
-  await expect(page.getByRole('status')).toContainText('公開状況を「ローカルのみ」にしました');
+  await expect(page.getByRole('status').filter({ hasText: '公開状況を「ローカルのみ」にしました' })).toBeVisible();
   await expect(queue).toContainText('優先度中 1');
   await queue.getByRole('button', { name: 'photo-notesを開く' }).click();
   await expect(queue).toContainText('GHSA-test-0000-0001');
@@ -364,7 +366,7 @@ test('探索・追加・検索・編集・アーカイブ・復帰と狭い画�
   await responseDialog.getByLabel('メモ（任意）').fill('vue の更新で解消するか確認');
   await responseDialog.getByRole('button', { name: '1件を変更' }).click();
   // investigating is stored as before and shown under the 対応中 stage.
-  await expect(page.getByRole('status')).toContainText('1件の対応状況を「対応中（調査中）」にしました');
+  await expect(page.getByRole('status').filter({ hasText: '1件の対応状況を「対応中（調査中）」にしました' })).toBeVisible();
   await expect(queue).toContainText('対応中（調査中）');
   await expect(page.getByRole('region', { name: '既知の脆弱性への対応' })).toContainText('対応中 1件（調査中1）');
   await expect(queue).toContainText('メモ: vue の更新で解消するか確認');
@@ -482,7 +484,7 @@ test('登録してチェック・送信前の確認・同じ内容の読み直�
   await expect(confirm).toContainText('フォルダのパス、アプリ名、ソース、lockファイル');
   await expect(page.getByText('今回追加したアプリを表示しています')).toBeVisible();
   await confirm.getByRole('button', { name: '1件を照会' }).click();
-  await expect(page.getByRole('status')).toContainText('既知の脆弱性があるアプリは1件です');
+  await expect(page.getByRole('status').filter({ hasText: '既知の脆弱性があるアプリは1件です' })).toBeVisible();
   await expect(page.getByRole('heading', { name: '脆弱性と対応', exact: true, level: 1 })).toBeVisible();
   await page.getByRole('navigation', { name: 'メインメニュー' }).getByRole('link', { name: '登録したアプリ', exact: true }).click();
   const row = page.getByRole('row').filter({ has: page.getByRole('link', { name: 'ledger-app', exact: true }) });
@@ -493,7 +495,7 @@ test('登録してチェック・送信前の確認・同じ内容の読み直�
   await expect(page.getByText(/依存情報を読み取り中/)).toHaveCount(0);
   await row.getByRole('checkbox', { name: 'ledger-appを選択' }).check();
   await page.getByRole('button', { name: '依存情報を読む' }).click();
-  await expect(page.getByRole('status')).toContainText('1件の依存情報を読み取りました（完了1件）');
+  await expect(page.getByRole('status').filter({ hasText: '1件の依存情報を読み取りました（完了1件）' })).toBeVisible();
   await expect(row).toContainText('時点');
   await expect(stale).toHaveCount(0);
   await page.getByRole('link', { name: '脆弱性と対応', exact: true }).click();
@@ -515,7 +517,7 @@ test('登録してチェック・送信前の確認・同じ内容の読み直�
   await page.getByRole('navigation', { name: 'メインメニュー' }).getByRole('link', { name: '登録したアプリ', exact: true }).click();
   await row.getByRole('checkbox', { name: 'ledger-appを選択' }).check();
   await page.getByRole('button', { name: '依存情報を読む' }).click();
-  await expect(page.getByRole('status')).toContainText('1件の依存情報を読み取りました（完了1件）');
+  await expect(page.getByRole('status').filter({ hasText: '1件の依存情報を読み取りました（完了1件）' })).toBeVisible();
   await expect(row).toContainText('依存内容が変わったため再照会が必要');
   await expect(row).not.toContainText('一部を照会できていません');
   expect(errors).toEqual([]);
@@ -784,7 +786,7 @@ test('登録後の次の操作を案内し、除外とカタログ登録解除�
   await expect(choice).toBeChecked();
   await page.unroute('**/api/projects/remove-excluded');
   await dialog.getByRole('button', { name: '除外する', exact: true }).click();
-  await expect(page.getByRole('status')).toContainText('1件をカタログから外しました');
+  await expect(page.getByRole('status').filter({ hasText: '1件をカタログから外しました' })).toBeVisible();
   const headers = { 'x-owndapp-client': 'web' };
   const { token } = await (await request.get('/api/session', { headers })).json();
   const { projects } = await (await request.get('/api/projects', { headers: { ...headers, 'x-owndapp-token': token } })).json();
