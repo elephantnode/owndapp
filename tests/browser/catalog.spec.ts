@@ -267,23 +267,35 @@ test('探索・追加・検索・編集・アーカイブ・復帰と狭い画�
   const results = page.getByRole('region', { name: '検索結果' });
   await expect(results).toContainText('vue@3.5.13');
   await expect(results).toContainText('npm · 直接（^3.5.0） · 本番 · npm公開');
+  // One box takes the version too, after the last "@".
+  await page.getByLabel('パッケージ名').fill('vue@3.5.13');
+  await page.getByRole('button', { name: '検索', exact: true }).click();
+  await expect(results).toContainText('名前に「vue」を含み版が 3.5.13 のパッケージ');
+  await page.getByLabel('パッケージ名').fill('vue@9.9.9');
+  await page.getByRole('button', { name: '検索', exact: true }).click();
+  await expect(page.getByRole('heading', { name: '読み取り済み2件の範囲では見つかりません' })).toBeVisible();
   await page.getByLabel('パッケージ名').fill('@vue/shared');
   await page.getByRole('button', { name: '検索', exact: true }).click();
   await expect(results).toContainText('間接');
   await page.getByLabel('パッケージ名').fill('react');
   await page.getByRole('button', { name: '検索', exact: true }).click();
   await expect(page.getByRole('heading', { name: '読み取り済み2件の範囲では見つかりません' })).toBeVisible();
-  // The overview lists every recorded package. Picking one searches it.
+  // The package list follows the search box: it lists the names containing the searched text. Picking one searches that exact name.
   const overview = page.getByRole('region', { name: '記録されているパッケージ' });
-  await expect(overview).toContainText('2種類');
-  await overview.getByRole('textbox', { name: 'パッケージを絞り込み' }).fill('SHARED');
+  await expect(overview).toContainText('「react」を名前に含むパッケージは記録されていません');
+  await page.getByLabel('パッケージ名').fill('SHARED');
+  await page.getByRole('button', { name: '検索', exact: true }).click();
   await expect(overview.getByRole('button', { name: 'vue', exact: true })).toHaveCount(0);
   await overview.getByRole('button', { name: '@vue/shared' }).click();
+  await expect(results).toContainText('「@vue/shared」という名前のパッケージ');
   await expect(results).toContainText('@vue/shared@3.5.13');
   await expect(page.getByLabel('パッケージ名')).toHaveValue('@vue/shared');
-  await overview.getByRole('textbox', { name: 'パッケージを絞り込み' }).fill('');
+  await page.getByRole('button', { name: 'クリア', exact: true }).click();
+  await expect(page.getByLabel('パッケージ名')).toHaveValue('');
+  await expect(overview).toContainText('2種類');
   await overview.getByRole('button', { name: 'vue', exact: true }).click();
   await expect(results).toContainText('vue@3.5.13');
+  await expect(overview).toContainText('「vue」を名前に含むもの 2種類');
   await page.evaluate(() => { (document.activeElement as HTMLElement)?.blur(); window.scrollTo(0, 0); });
   await page.screenshot({ path: 'docs/screenshots/dependency-search.png', fullPage: true, animations: 'disabled' });
   await results.getByRole('link', { name: 'photo-notes', exact: true }).click();
@@ -801,13 +813,11 @@ test('メインメニューから依存検索を開き、部分名でスコー�
   await page.goto('/#home');
   await page.getByRole('navigation', { name: 'メインメニュー' }).getByRole('link', { name: '依存検索', exact: true }).click();
   await expect(page.getByRole('heading', { name: '依存検索', exact: true, level: 1 })).toBeVisible();
-  await expect(page.getByLabel('名前の一致方法')).toHaveValue('contains');
+  // A single text box: no separate matching or version fields.
+  await expect(page.getByRole('search').getByRole('textbox')).toHaveCount(1);
   await page.getByLabel('パッケージ名', { exact: true }).fill('SHARED');
   await page.getByRole('button', { name: '検索', exact: true }).click();
   await expect(page.getByRole('region', { name: '検索結果', exact: true })).toContainText('@vue/shared');
-  await page.getByLabel('名前の一致方法').selectOption('exact');
-  await page.getByRole('button', { name: '検索', exact: true }).click();
-  await expect(page.getByRole('heading', { name: /の範囲では見つかりません/ })).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
   await page.screenshot({ path: 'docs/screenshots/dependency-search-narrow.png', fullPage: true, animations: 'disabled' });
@@ -961,7 +971,6 @@ test('同じ件数の依存を読み直しても、最後に実行した検索�
   await expect(page.getByRole('button', { name: 'old-package', exact: true })).toBeVisible();
   // Editing the form is not a new search. Refresh must use the submitted query and matching mode.
   await page.getByLabel('パッケージ名', { exact: true }).fill('not-submitted');
-  await page.getByLabel('名前の一致方法').selectOption('exact');
   const panel = page.getByRole('region', { name: '依存の検索範囲', exact: true });
   await panel.getByText('検索対象外・未確認のアプリを確認', { exact: true }).click();
   await panel.getByLabel('読み取り状態', { exact: true }).selectOption('all');

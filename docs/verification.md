@@ -12,6 +12,16 @@
 - Windowsのパス処理と能力別UI/APIはmacOS上で模擬検証。Windows実機/実GitHub runnerでの導入・権限・ジャンクション等は未確認。
 - 新規導入の検証範囲は[導入検証](install-verification.md)、Windowsの残項目は[Windows手順](windows.md)を参照。
 
+## Go・Ruby・Maven・CVSS v4.0の追加（2026-10-27）
+
+macOS / Apple Silicon、Node.js 24で、単体・API 202件、型検査・本番ビルド、Chromeのブラウザ操作16件が成功。
+
+- `go.mod`・`Gemfile.lock`・`pom.xml` の読み取り、親POMの反映と変更検知、送信対象の区別、RubyGems・Mavenの版の並びと修正版を生成fixtureで検証。
+- CVSS v4.0は、全104,976通りの基本ベクトル（脅威値・環境値を加えた変種を含め419,904件）とランダムな5万件で、参照計算機（Red Hat `cvss40.js` b0930b7）と点数が一致。
+- 生成fixture（12形式）でosv-scanner 2.7.0と比べ、両方が照会したパッケージでは別名をまとめた脆弱性の件数とIDが一致し、CVSSの点数も一致した。osv-scannerだけが検出したのは、deps.devで補ったMavenの推移的な依存（owndappは照会しない）だった。比較のfixtureとスクリプトはリポジトリに含めていない。
+- 依存検索の入力欄を1つにまとめた変更（`名前@版`、一覧からの完全一致検索、一覧の連動）を、同じブラウザ操作テストで確認。
+- Windows実機・実際のプロジェクトでの確認はしていない。
+
 ## 公開時の確認
 
 公開用コピーの例示パスを匿名化した後も、195テスト・型/本番ビルド・Chrome16件を隔離環境で確認した。GitHub CIの実行結果はpush後に別途確認する。設定ファイルを用意したことを実行成功の代わりにしない。

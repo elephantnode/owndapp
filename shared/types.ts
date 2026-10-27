@@ -90,9 +90,9 @@ export type DependencyScope = 'prod' | 'dev' | 'optional' | 'peer' | 'unknown';
  * (for example pnpm and Yarn 2+ lockfiles, or pinned lines in requirements.txt). Which registry it was is not recorded.
  */
 export type DependencySource = 'registry' | 'other-registry' | 'registry-unrecorded' | 'url' | 'git' | 'file' | 'unknown';
-/** OSV ecosystem names. npm covers npm, Yarn, and pnpm lockfiles; Packagist is Composer; PyPI is Python. */
-export type Ecosystem = 'npm' | 'Packagist' | 'PyPI' | 'crates.io';
-export const ecosystemLabels: Record<Ecosystem, string> = { npm: 'npm', Packagist: 'Composer', PyPI: 'Python', 'crates.io': 'Rust' };
+/** OSV ecosystem names. npm covers npm, Yarn, and pnpm lockfiles; Packagist is Composer; PyPI is Python; RubyGems is Bundler. */
+export type Ecosystem = 'npm' | 'Packagist' | 'PyPI' | 'crates.io' | 'Go' | 'RubyGems' | 'Maven';
+export const ecosystemLabels: Record<Ecosystem, string> = { npm: 'npm', Packagist: 'Composer', PyPI: 'Python', 'crates.io': 'Rust', Go: 'Go', RubyGems: 'Ruby', Maven: 'Maven' };
 export interface Dependency {
   ecosystem: Ecosystem;
   name: string;
@@ -108,8 +108,13 @@ export interface Dependency {
   /** Folder relative to the project that the dependency belongs to. '' is the project itself or a hoisted dependency. */
   component: string;
 }
-/** unpinned: a requirements file was read, but some lines name no exact version. */
-export type LockFileStatus = 'ok' | 'mismatch' | 'unpinned' | 'no-lock' | 'invalid' | 'unsupported' | 'too-large' | 'unreadable';
+/**
+ * unpinned: a requirements file or pom.xml was read, but some entries name no exact version.
+ * direct-only: read, but the file does not record every indirect dependency (pom.xml, or go.mod before Go 1.17).
+ */
+export type LockFileStatus = 'ok' | 'mismatch' | 'unpinned' | 'direct-only' | 'no-lock' | 'invalid' | 'unsupported' | 'too-large' | 'unreadable';
+/** File statuses whose dependencies were read and recorded. */
+export const readFileStatuses: LockFileStatus[] = ['ok', 'mismatch', 'unpinned', 'direct-only'];
 export interface LockFileResult {
   /** The lockfile, or the manifest (package.json, composer.json, pyproject.toml, Pipfile) when no lockfile exists, relative to the project folder. */
   path: string;

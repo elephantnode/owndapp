@@ -4,7 +4,7 @@ import { normalizePython } from './python-locks.js';
 import { scoreSeverityEntry } from './cvss.js';
 export { compareSemver };
 
-// Queries OSV (https://osv.dev) for known vulnerabilities of exact package versions: npm, Packagist (Composer), and PyPI.
+// Queries OSV (https://osv.dev) for known vulnerabilities of exact package versions: npm, Packagist (Composer), PyPI, crates.io, Go, RubyGems, and Maven.
 // Only the ecosystem, package name, and version leave this Mac: never paths, project names, or source.
 export const osvEndpoint = 'https://api.osv.dev';
 const batchSize = 500;

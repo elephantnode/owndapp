@@ -6,7 +6,7 @@ OSVの照会結果は、lockに記録されたパッケージの版に対する�
 
 提供元の重大度ラベルと、検証できるCVSS値を取り込みます。関連するGHSA/CVE/PYSEC等の別名は推移的に統合し、照会順によって既知の高い重大度が消えないようにします。記載が食い違う場合は高い判定を暫定採用し、出典・CVSS値・差異を表示します。
 
-CVSS v3.0/v3.1は基本値を計算します。v2/v4のベクトルは今回の採点対象外とし、不明の理由を示します。重大度を判定できないことは安全を意味しません。
+CVSS v3.0/v3.1は基本値を計算します。CVSS v4.0はベクトルに含まれる基本・脅威・環境の値から点数を計算します（FIRSTの参照計算機と同じ値。v3とv4の両方がある場合も、上の規則どおり高い方を暫定採用します）。v2のベクトルは尺度が異なるため採点対象外とし、不明の理由を示します。重大度を判定できないことは安全を意味しません。
 
 ## 優先度
 
@@ -34,5 +34,6 @@ CVSS v3.0/v3.1は基本値を計算します。v2/v4のベクトルは今回の�
 - [OSV schema](https://ossf.github.io/osv-schema/): severity、affected[].severity、aliases、withdrawn。
 - [FIRST CVSS v3.1 specification](https://www.first.org/cvss/v3.1/specification-document): 基本値・丸め・重大度区分。
 - [FIRST CVSS v3.0 specification](https://www.first.org/cvss/v3.0/specification-document): 基本値。
+- [FIRST CVSS v4.0 specification](https://www.first.org/cvss/v4.0/specification-document): MacroVectorと点数の計算。実装は [参照計算機](https://github.com/RedHatProductSecurity/cvss-v4-calculator)（BSD-2-Clause、`cvss40.js` b0930b7）から移植し、全104,976通りの基本ベクトル（脅威値・環境値を加えた変種を含め419,904件）と、環境値をランダムに含む5万件で、参照計算機と同じ点数になることを確認した。
 
 外部の悪用実績データ（KEV）や悪用確率（EPSS）は未連携です。期限切れの対象外判断の自動再開、アーカイブ内の未解消検出の警告は今回の対象に含みません。

@@ -1,10 +1,11 @@
 import type { Severity } from '../shared/types.js';
+import { scoreCvss4 } from './cvss4.js';
 
 // CVSS v3.0 / v3.1 base scores, following the FIRST specification (https://www.first.org/cvss/v3.1/specification-document).
-// v2 and v4 vectors are not scored here: v2 uses a different scale, and v4 needs the full MacroVector lookup tables.
+// v4.0 vectors are scored in cvss4.ts. v2 vectors are not scored: v2 uses a different scale.
 
 export type CvssScore =
-  | { ok: true; version: '3.0' | '3.1' | null; score: number; severity: Severity | null; vector: string | null }
+  | { ok: true; version: '3.0' | '3.1' | '4.0' | null; score: number; severity: Severity | null; vector: string | null }
   | { ok: false; reason: string };
 
 const metrics: Record<string, string[]> = {
@@ -58,8 +59,8 @@ const declared: Record<string, string> = { CVSS_V2: '2', CVSS_V3: '3', CVSS_V4: 
 
 /**
  * Scores one OSV severity entry, which arrives as untrusted JSON. Only the OSV types CVSS_V2, CVSS_V3, and CVSS_V4 are read.
- * Accepts v3.0/v3.1 vectors under CVSS_V3, and plain numeric scores from 0 to 10 under CVSS_V3 or CVSS_V4 (their rating scales match).
- * v2 and v4 vectors, numeric v2 scores, and vectors of another version than the type names are reported rather than guessed.
+ * Accepts v3.0/v3.1 vectors under CVSS_V3, v4.0 vectors under CVSS_V4, and plain numeric scores from 0 to 10 under CVSS_V3 or CVSS_V4
+ * (their rating scales match). v2 vectors, numeric v2 scores, and vectors of another version than the type names are reported rather than guessed.
  */
 export function scoreSeverityEntry(type: unknown, raw: unknown): CvssScore {
   if (typeof type !== 'string') return { ok: false, reason: 'CVSS の種類が文字列ではありません' };
@@ -77,6 +78,6 @@ export function scoreSeverityEntry(type: unknown, raw: unknown): CvssScore {
   const found = /^CVSS:(\d+)\./.exec(value)?.[1] ?? (/(^|\/)Au:[MSN](\/|$)/.test(value) ? '2' : null);
   if (found && found !== version) return { ok: false, reason: `種類 ${type} とベクトルの版（CVSS v${found}）が一致しません` };
   if (version === '3') return scoreCvss3(value);
-  if (version === '4') return { ok: false, reason: 'CVSS v4 のベクトルは未対応のため採点しません' };
+  if (version === '4') return scoreCvss4(value);
   return { ok: false, reason: 'CVSS v2 のベクトルは未対応のため採点しません' };
 }

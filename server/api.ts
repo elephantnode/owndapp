@@ -13,7 +13,7 @@ import { osvApi, type OsvClient, type RunOptions } from './osv.js';
 import { check as checkVulnerabilities, preview as previewVulnerabilities, snapshots as vulnerabilitySnapshots, summarize, type CheckPhase } from './vulnerabilities.js';
 import { priorityOf, priorityReasons, severityRank } from '../shared/priority.js';
 import { chooseApplication, chooseFolder, openInFinder, openWithApp, type AppOpener, type AppPicker, type FolderOpener, type FolderPicker } from './folder-picker.js';
-import { appRoleLabels, type Advisory, type AppRole, type Candidate, type Dependency, type DependencySnapshot, type Exposure, type GitStatus, type Lifecycle, type ProjectEdit, type QueueItem, type ResponseRecord, type ResponseStatus, type Scan } from '../shared/types.js';
+import { appRoleLabels, readFileStatuses, type Advisory, type AppRole, type Candidate, type Dependency, type DependencySnapshot, type Exposure, type GitStatus, type Lifecycle, type ProjectEdit, type QueueItem, type ResponseRecord, type ResponseStatus, type Scan } from '../shared/types.js';
 
 const bulkLimit = 1000; // 1000 ids stay within the 64KB request limit.
 
@@ -224,7 +224,7 @@ export function createApi(store: Store, port = 4310, pickFolder: FolderPicker = 
       return project && snapshot ? [{ project: { id, name: project.name, path: project.path, lifecycle: project.lifecycle }, readAt: snapshot.readAt, status: snapshot.status, dependencies }] : [];
     });
     const read = [...snapshots.values()].filter(snapshot => projects.has(snapshot.projectId));
-    return c.json({ matches, coverage: { read: read.length, withLock: read.filter(snapshot => snapshot.files.some(file => ['ok', 'mismatch', 'unpinned'].includes(file.status))).length, total: projects.size, unsupported: read.filter(snapshot => snapshot.files.some(file => file.status === 'unsupported')).length } });
+    return c.json({ matches, coverage: { read: read.length, withLock: read.filter(snapshot => snapshot.files.some(file => readFileStatuses.includes(file.status))).length, total: projects.size, unsupported: read.filter(snapshot => snapshot.files.some(file => file.status === 'unsupported')).length } });
   });
   const vulnerabilityIds = async (c: { req: { json: <T>() => Promise<T> } }) => {
     const input = await c.req.json<{ ids: string[] }>();

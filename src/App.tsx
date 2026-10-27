@@ -93,10 +93,10 @@ async function readGitInfo(ids: string[]) {
 }
 const scopeLabels: Record<Dependency['scope'], string> = { prod: '本番', dev: '開発', optional: '任意', peer: 'peer', unknown: '区分不明' };
 // registry is the ecosystem's public registry, named per ecosystem in sourceLabel.
-const publicRegistries: Record<Ecosystem, string> = { npm: 'npm公開', Packagist: 'Packagist', PyPI: 'PyPI', 'crates.io': 'crates.io' };
+const publicRegistries: Record<Ecosystem, string> = { npm: 'npm公開', Packagist: 'Packagist', PyPI: 'PyPI', 'crates.io': 'crates.io', Go: 'Goモジュール', RubyGems: 'RubyGems.org', Maven: 'Maven' };
 const sourceLabel = (d: Pick<Dependency, 'ecosystem' | 'source'>) => d.source === 'registry' ? publicRegistries[d.ecosystem ?? 'npm'] : sourceLabels[d.source];
 const sourceLabels: Record<Dependency['source'], string> = { registry: '公開レジストリ', 'other-registry': '別のレジストリ', 'registry-unrecorded': 'レジストリ（lockに記録なし）', url: 'URL', git: 'Git', file: 'ローカル', unknown: '取得元不明' };
-const fileStatusLabels: Record<DependencySnapshot['files'][number]['status'], string> = { ok: '読み取り済み', mismatch: '宣言と不一致', unpinned: '版の固定なしを含む', 'no-lock': 'lockなし', invalid: '形式エラー', unsupported: '未対応の形式', 'too-large': 'サイズ上限超過', unreadable: '読み取り不可' };
+const fileStatusLabels: Record<DependencySnapshot['files'][number]['status'], string> = { ok: '読み取り済み', mismatch: '宣言と不一致', unpinned: '版の固定なしを含む', 'direct-only': '直接依存のみ', 'no-lock': 'lockなし', invalid: '形式エラー', unsupported: '未対応の形式', 'too-large': 'サイズ上限超過', unreadable: '読み取り不可' };
 const severityLabels: Record<Severity, string> = { malicious: '悪意のあるパッケージ', critical: '緊急', high: '高', moderate: '中', low: '低', unknown: '重大度不明' };
 const severityTone = (severity: Severity | null) => severity === 'malicious' || severity === 'critical' || severity === 'high' ? 'text-error' : severity === 'moderate' ? 'text-warning' : 'text-dim';
 const notSentLabels: Record<string, string> = { git: 'Git', url: 'URL', file: 'ローカル', unknown: '取得元不明', 'no-version': '版不明', 'rust-source-unverified': 'Rustの公開取得元を確認できない依存' };
@@ -1635,7 +1635,7 @@ function DependencyPanel({ project, reloadProjects, className, headingClassName 
         <dt className="text-muted-foreground">読み取り</dt><dd className="text-right">{date(snapshot.readAt)}</dd>
         <dt className="text-muted-foreground">lock形式</dt><dd className="text-right">{[...new Set(snapshot.files.flatMap(f => f.status === 'no-lock' ? [] : f.format ? [f.format] : f.lockfileVersion ? [`npm v${f.lockfileVersion}`] : []))].join('・') || 'なし'}</dd>
       </dl>
-      {snapshot.status === 'no-lock' && !snapshot.files.length && <p className="mt-3 text-caption leading-[1.8] text-warning">このアプリには、読み取りに対応する依存形式が見つかりませんでした。現在の対象はnpm・Yarn・pnpm・Composer・Python・Rustです。Swift・Goなどの依存検査は未対応で、再読み取りだけでは判定できません。脆弱性なしという意味ではありません。</p>}
+      {snapshot.status === 'no-lock' && !snapshot.files.length && <p className="mt-3 text-caption leading-[1.8] text-warning">このアプリには、読み取りに対応する依存形式が見つかりませんでした。現在の対象はnpm・Yarn・pnpm・Composer・Python・Rust・Go・Ruby（Bundler）・Maven（pom.xml）です。Swift・Gradleなどの依存検査は未対応で、再読み取りだけでは判定できません。脆弱性なしという意味ではありません。</p>}
       {data.changed && <p className="mt-3 flex items-center gap-1.5 text-caption text-warning"><CircleAlert size={14} className="shrink-0" />読み取り後に lock または宣言のファイル（package.json など）が変わっています</p>}
       {problems.length > 0 && <ul className="mt-3 grid gap-1.5 text-caption">{problems.map(f => <li key={f.path} className={wrap}><code className="text-dim">{f.path}</code> <span className={f.status === 'no-lock' ? 'text-muted-foreground' : 'text-warning'}>{fileStatusLabels[f.status]}</span>{f.message && <span className="block text-muted-foreground">{f.message}</span>}</li>)}</ul>}
       {direct.length > 0 && <details className="mt-3 text-caption text-dim"><summary className="min-h-8 py-1.5">直接依存 {direct.length}件</summary>
@@ -1687,10 +1687,15 @@ type DependencyProgress = { running: boolean; done: number; total: number };
 type ScanRoot = { path: string; createdAt: string; excluded: boolean;
   lastScan: { id: string; status: Scan['status']; startedAt: string; endedAt: string | null; candidates: number; newCandidates: number } | null };
 
+// "next@15.1.0" -> name and version. A leading "@" belongs to a scoped npm name; a "v" before the digits is dropped (versions are recorded without it).
+function parseSearch(text: string) {
+  const value = text.trim(); const at = value.lastIndexOf('@');
+  return at > 0 ? { name: value.slice(0, at).trim(), version: value.slice(at + 1).trim().replace(/^v(?=\d)/, '') } : { name: value, version: '' };
+}
+
 function DependencySearch({ projects, toCatalog, reading, readAll, readSelected }: { projects: Project[]; toCatalog: () => void; reading: boolean; readAll: () => Promise<void>; readSelected: (ids: string[]) => Promise<{ summary: string }> }) {
-  const [name, setName] = useState(''); const [version, setVersion] = useState('');
-  const [match, setMatch] = useState<'contains' | 'exact'>('contains');
-  const [result, setResult] = useState<SearchResult & { query: string } | null>(null);
+  const [text, setText] = useState('');
+  const [result, setResult] = useState<SearchResult & { name: string; version: string; mode: 'contains' | 'exact' } | null>(null);
   const [error, setError] = useState(''); const [busy, setBusy] = useState(false);
   const id = useId();
   const read = projects.filter(p => p.dependencyStatus);
@@ -1708,37 +1713,40 @@ function DependencySearch({ projects, toCatalog, reading, readAll, readSelected 
     const query = lastQuery.current;
     if (query) void run(query.name, query.version, query.mode);
   }, [inventoryKey, reading]);
-  async function run(packageName: string, packageVersion: string, mode: 'contains' | 'exact' = match) {
+  async function run(packageName: string, packageVersion: string, mode: 'contains' | 'exact') {
     setError('');
-    if (!packageName.trim()) { setError('パッケージ名を入力してください'); return; }
+    if (!packageName) { setError('パッケージ名を入力してください'); return; }
     const current = ++sequence.current;
-    lastQuery.current = { name: packageName.trim(), version: packageVersion.trim(), mode };
+    lastQuery.current = { name: packageName, version: packageVersion, mode };
     setBusy(true);
     try {
-      const params = new URLSearchParams({ name: packageName.trim(), match: mode, ...(packageVersion.trim() ? { version: packageVersion.trim() } : {}) });
+      const params = new URLSearchParams({ name: packageName, match: mode, ...(packageVersion ? { version: packageVersion } : {}) });
       const data = await request<SearchResult>(`/dependencies/search?${params}`);
-      if (current === sequence.current) setResult({ ...data, query: `${packageName.trim()}${packageVersion.trim() ? `@${packageVersion.trim()}` : ''}` });
+      if (current === sequence.current) setResult({ ...data, name: packageName, version: packageVersion, mode });
     } catch (e) { if (current === sequence.current) { setResult(null); setError((e as Error).message); } } finally { if (current === sequence.current) setBusy(false); }
   }
-  function search(event: FormEvent) { event.preventDefault(); void run(name, version); }
-  // Picking a package from the overview searches it and brings the result into view.
+  // Typing searches by part of the name; an exact name comes from picking a package or narrowing a result.
+  function search(event: FormEvent) { event.preventDefault(); const { name, version } = parseSearch(text); void run(name, version, 'contains'); }
+  function clear() { sequence.current++; lastQuery.current = null; setText(''); setResult(null); setError(''); setBusy(false); }
+  // Picking a package from the list searches that exact name and brings the result into view.
   function pick(packageName: string) {
-    setName(packageName); setVersion('');
-    void run(packageName, '').then(() => { window.scrollTo({ top: 0 }); heading.current?.focus(); });
+    setText(packageName);
+    void run(packageName, '', 'exact').then(() => { window.scrollTo({ top: 0 }); heading.current?.focus(); });
   }
+  // 名前に「vue」を含み版が 3.5.13 の / 「vue」という名前の
+  const described = result && `${result.mode === 'exact' ? `「${result.name}」という名前` : `名前に「${result.name}」を含`}${result.version ? `${result.mode === 'exact' ? 'で' : 'み'}版が ${result.version} の` : result.mode === 'exact' ? 'の' : 'む'}`;
   const coverage = result?.coverage || { read: read.length, withLock: read.filter(p => p.dependencyStatus === 'complete' || p.dependencyStatus === 'partial').length, total: projects.length, unsupported: projects.filter(project => project.dependencyUnsupported).length };
   return <>
-    <PageHeader context="依存パッケージから探す" title="依存検索" subtitle="読み取ったlock（npm・Yarn・pnpm・Composer・Python・Rust）から、パッケージを使っているアプリを探します。" />
+    <PageHeader context="依存パッケージから探す" title="依存検索" subtitle="読み取った依存の記録（lockファイル・go.mod・pom.xml など）から、パッケージを使っているアプリを探します。" />
     <h2 ref={heading} tabIndex={-1} className="sr-only">パッケージを検索</h2>
-    <form onSubmit={search} className="mb-4 flex flex-wrap items-end gap-3">
-      <div className="flex min-w-[240px] flex-1 flex-col gap-2"><Label htmlFor={`${id}-name`}>パッケージ名</Label><Input id={`${id}-name`} value={name} onChange={e => setName(e.target.value)} placeholder="Brotli、next、@types/node など" maxLength={214} autoComplete="off" spellCheck={false} /></div>
-      <div className="flex w-[160px] flex-col gap-2 max-md:w-full"><Label htmlFor={`${id}-match`}>名前の一致方法</Label><NativeSelect id={`${id}-match`} containerClassName="w-full" value={match} onChange={e => setMatch(e.target.value as 'contains' | 'exact')}><NativeSelectOption value="contains">部分一致</NativeSelectOption><NativeSelectOption value="exact">完全一致</NativeSelectOption></NativeSelect></div>
-      <div className="flex w-[180px] flex-col gap-2 max-md:w-full"><Label htmlFor={`${id}-version`}>版（任意・完全一致）</Label><Input id={`${id}-version`} value={version} onChange={e => setVersion(e.target.value)} placeholder="15.1.0" maxLength={256} autoComplete="off" spellCheck={false} /></div>
+    <form onSubmit={search} role="search" className="mb-2 flex flex-wrap items-end gap-3">
+      <div className="flex min-w-[240px] flex-1 flex-col gap-2"><Label htmlFor={`${id}-name`}>パッケージ名</Label><Input id={`${id}-name`} value={text} onChange={e => setText(e.target.value)} placeholder="brotli、@types/node、next@15.1.0 など" maxLength={480} autoComplete="off" spellCheck={false} /></div>
       <Button variant="default" disabled={busy} className="max-md:w-full"><Search size={16} />{busy ? '検索中…' : '検索'}</Button>
+      {result && <Button type="button" variant="ghost" onClick={clear} className="max-md:w-full">クリア</Button>}
     </form>
-    <p className="mb-4 text-caption text-muted-foreground">名前は大文字・小文字を区別しません。部分一致なら「Brotli」で brotli-wasm なども探せます。版を指定した場合は完全一致です。</p>
+    <p className="mb-4 text-caption text-muted-foreground">名前の一部で探します（大文字・小文字は区別しません）。版でも絞るときは「next@15.1.0」のように @ のあとに版を書きます。</p>
     <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-      <p className="text-caption text-muted-foreground tabular-nums">依存の読み取りを実施 {coverage.read}件 / 登録 {coverage.total}件（解析できた記録 {coverage.withLock}件）。読み取っていないアプリは結果に含まれません。未対応の依存形式は検索対象外です。コード内やOS標準ライブラリの使用は検索しません。脆弱性の有無は判定しません。{(coverage.unsupported ?? 0) > 0 && <span className="mt-1 block text-warning">未対応の依存形式を含むアプリ {coverage.unsupported}件は、一部または全体が検索対象外です。各アプリの依存情報で確認してください。</span>}</p>
+      <p className="text-caption text-muted-foreground tabular-nums">依存の読み取りを実施 {coverage.read}件 / 登録 {coverage.total}件（解析できた記録 {coverage.withLock}件）。読み取っていないアプリは結果に含まれません。未対応の依存形式は検索対象外です。コード内やOS標準ライブラリの使用は検索しません。脆弱性の有無は判定しません。{(coverage.unsupported ?? 0) > 0 && <span className="mt-1 block text-warning">未対応の依存形式を含むアプリ {coverage.unsupported}件は、一部または全体が検索対象外です。下の「依存の検索範囲」で確認し、読み直せます。</span>}</p>
       <Button size="sm" disabled={reading || !activeCount} onClick={() => void readAll()} title="lockファイルを読むだけで、インストールや実行、外部への送信はしません"><RefreshCw size={14} />{reading ? '読み取り中…' : `アーカイブ以外をすべて読み取る（${activeCount}件）`}</Button>
     </div>
     {error && <Alert variant="destructive" className="mb-6"><CircleAlert size={18} /><AlertDescription>{error}</AlertDescription></Alert>}
@@ -1747,7 +1755,7 @@ function DependencySearch({ projects, toCatalog, reading, readAll, readSelected 
       <p className={emptyText}>上の「アーカイブ以外をすべて読み取る」か、カタログで選んで「依存情報を読む」を実行してください。これから登録するアプリは自動で読み取ります。lockファイルを読むだけで、インストールや実行はしません。</p>
       <Button onClick={toCatalog}>カタログで選ぶ<ArrowRight size={16} /></Button>
     </Empty> : result && (result.matches.length ? <section aria-label="検索結果">
-      <p className="mb-3 text-xs"><strong className="tabular-nums">{result.matches.length}件</strong>のアプリが「{result.query}」を含みます</p>
+      <p className="mb-3 text-xs"><strong className="tabular-nums">{result.matches.length}件</strong>のアプリが、{described}パッケージを使っています</p>
       <Table>
         <TableHeader><TableRow className="border-0"><TableHead>アプリ</TableHead><TableHead>一致した依存</TableHead><TableHead className="max-lg:hidden">読み取り</TableHead></TableRow></TableHeader>
         <TableBody>{result.matches.map(match => <TableRow key={match.project.id}>
@@ -1759,9 +1767,10 @@ function DependencySearch({ projects, toCatalog, reading, readAll, readSelected 
         </TableRow>)}</TableBody>
       </Table>
     </section> : <Empty><Search size={28} /><h2 className={emptyTitle}>読み取り済み{result.coverage.read}件の範囲では見つかりません</h2>
-      <p className={emptyText}>「{result.query}」を含むlockはありませんでした。名前の一致方法を変えることもできます（Pythonは - と _ の違いを無視）。読み取っていないアプリや、対応していない形式の依存は確認していません。</p></Empty>)}
+      <p className={emptyText}>{described}依存は記録にありませんでした（Pythonは - と _ の違いを無視）。{result.mode === 'exact' ? '名前の一部で探すと見つかることがあります。' : ''}読み取っていないアプリや、対応していない形式の依存は確認していません。</p>
+      {result.mode === 'exact' && <Button onClick={() => void run(result.name, result.version, 'contains')}>「{result.name}」を名前の一部として探す</Button>}</Empty>)}
     <DependencyCoverage projects={projects} reading={reading} onRead={readSelected} />
-    {coverage.read > 0 && <PackageOverview key={inventoryKey} pick={pick} />}
+    {coverage.read > 0 && <PackageOverview key={inventoryKey} query={result?.name ?? ''} pick={pick} />}
   </>;
 }
 
@@ -1769,23 +1778,26 @@ type PackageSummary = { ecosystem: Ecosystem; name: string; projects: number; di
 const compareVersions = (a: string, b: string) => b.localeCompare(a, undefined, { numeric: true });
 
 // Every package recorded in the ledger, most used first, so the contents can be browsed without knowing a name.
-function PackageOverview({ pick }: { pick: (name: string) => void }) {
-  const [filter, setFilter] = useState(''); const [limit, setLimit] = useState(100);
-  const [data, setData] = useState<{ total: number; packages: PackageSummary[] } | null>(null);
+// After a search it lists only the package names containing the searched text, so the search box drives both.
+function PackageOverview({ query, pick }: { query: string; pick: (name: string) => void }) {
+  const [limit, setLimit] = useState(100);
+  // A new search starts from the first 100 again; the previous list stays until the new one arrives.
+  const [shownQuery, setShownQuery] = useState(query);
+  if (shownQuery !== query) { setShownQuery(query); setLimit(100); }
+  const [data, setData] = useState<{ total: number; packages: PackageSummary[]; query: string } | null>(null);
   const [error, setError] = useState('');
   useEffect(() => {
     let alive = true;
     const timer = setTimeout(() => {
-      request<{ total: number; packages: PackageSummary[] }>(`/dependencies/packages?${new URLSearchParams({ q: filter.trim(), limit: String(limit) })}`)
-        .then(d => { if (alive) { setData(d); setError(''); } }, e => { if (alive) setError(e.message); });
+      request<{ total: number; packages: PackageSummary[] }>(`/dependencies/packages?${new URLSearchParams({ q: query, limit: String(limit) })}`)
+        .then(d => { if (alive) { setData({ ...d, query }); setError(''); } }, e => { if (alive) setError(e.message); });
     }, 200);
     return () => { alive = false; clearTimeout(timer); };
-  }, [filter, limit]);
+  }, [query, limit]);
   return <section aria-labelledby="package-overview" className="mt-10">
     <div className="mb-4 flex flex-wrap items-end justify-between gap-4">
       <div><h2 id="package-overview" className="text-base font-semibold">記録されているパッケージ</h2>
-        <p className="mt-1 text-caption text-muted-foreground tabular-nums">{data ? `${data.total.toLocaleString()}種類。使っているアプリが多い順。名前を選ぶと、そのパッケージで検索します。` : '読み込んでいます。'}</p></div>
-      <SearchBox label="パッケージを絞り込み" className="w-[280px] max-md:w-full"><Search size={16} className="shrink-0" /><Input className={searchInput} value={filter} onChange={e => { setFilter(e.target.value); setLimit(100); }} placeholder="名前の一部で絞り込み" spellCheck={false} /></SearchBox>
+        <p className="mt-1 text-caption text-muted-foreground tabular-nums">{data ? `${data.query ? `「${data.query}」を名前に含むもの ` : ''}${data.total.toLocaleString()}種類。使っているアプリが多い順。名前を選ぶと、その名前だけで検索します。` : '読み込んでいます。'}</p></div>
     </div>
     {error && <Alert variant="destructive" className="mb-4"><CircleAlert size={18} /><AlertDescription>{error}</AlertDescription></Alert>}
     {data && (data.packages.length ? <>
@@ -1801,9 +1813,9 @@ function PackageOverview({ pick }: { pick: (name: string) => void }) {
       </Table>
       {data.packages.length < data.total && <div className="flex items-center justify-between gap-4 py-4 text-caption text-muted-foreground tabular-nums">
         <span>{data.packages.length.toLocaleString()} / {data.total.toLocaleString()}種類を表示</span>
-        <Button size="sm" onClick={() => setLimit(l => Math.min(l + 200, 1000))} disabled={limit >= 1000}>{limit >= 1000 ? '絞り込むとほかも表示できます' : 'さらに表示'}</Button>
+        <Button size="sm" onClick={() => setLimit(l => Math.min(l + 200, 1000))} disabled={limit >= 1000}>{limit >= 1000 ? 'パッケージ名で検索するとほかも表示できます' : 'さらに表示'}</Button>
       </div>}
-    </> : <p className="border-y py-8 text-center text-caption text-muted-foreground">「{filter}」を名前に含むパッケージは記録されていません。</p>)}
+    </> : <p className="border-y py-8 text-center text-caption text-muted-foreground">「{data.query}」を名前に含むパッケージは記録されていません。</p>)}
   </section>;
 }
 

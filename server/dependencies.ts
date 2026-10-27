@@ -6,22 +6,27 @@ import { parsePnpmLock, parseYarnLock } from './js-locks.js';
 import { parseCargoLock } from './cargo-locks.js';
 import { parseComposerLock } from './composer-lock.js';
 import { isPythonProject, parsePipfileLock, parsePoetryLock, parseRequirements, parseUvLock } from './python-locks.js';
-import type { Dependency, DependencyStatus, LockFileResult, Project } from '../shared/types.js';
+import { parseGoMod } from './go-mod.js';
+import { parseGemfileLock } from './gemfile-lock.js';
+import { parentPomPath, parsePom } from './maven-pom.js';
+import { readFileStatuses, type Dependency, type DependencyStatus, type LockFileResult, type Project } from '../shared/types.js';
 
-// Reads the lockfiles of a project and its components: npm, Yarn, pnpm, Composer, and Python (Poetry, uv, Pipenv, requirements).
+// Reads the lockfiles of a project and its components: npm, Yarn, pnpm, Composer, Python (Poetry, uv, Pipenv, requirements),
+// Rust (Cargo.lock), Go (go.mod), Ruby (Gemfile.lock), and Maven (pom.xml, direct dependencies only).
 // Files are only read as data. Nothing in the project is installed, run, or evaluated, and no file is written.
 const lockLimit = 32 * 1024 * 1024;
 const manifestLimit = 2 * 1024 * 1024;
-const manifestNames = new Set(['package.json', 'composer.json', 'pyproject.toml', 'Pipfile', 'Cargo.toml']);
+const manifestNames = new Set(['package.json', 'composer.json', 'pyproject.toml', 'Pipfile', 'Cargo.toml', 'Gemfile']);
 const requirementsFile = /^requirements[^/]*\.txt$/i;
 
 async function exists(path: string) { return lstat(path).then(() => true, () => false); }
 
 export interface DependencyReadResult { status: DependencyStatus; files: LockFileResult[]; dependencies: Dependency[] }
 
-type Family = 'node' | 'php' | 'python' | 'rust';
+type Family = 'node' | 'php' | 'python' | 'rust' | 'ruby';
 const noLockMessages: Record<Family, string> = {
   rust: 'Cargo.lock がありません',
+  ruby: 'Gemfile.lock がありません',
   node: 'Node.js の lock がありません（npm・Yarn・pnpm に対応）',
   php: 'composer.lock がありません',
   python: 'Python の lock がありません（poetry.lock・uv.lock・Pipfile.lock・requirements*.txt に対応）',
@@ -32,7 +37,7 @@ export async function readDependencies(project: Pick<Project, 'path' | 'componen
   const locations = [...new Set(['', ...project.components.map(c => c.path.split('\\').join('/'))])].sort((a, b) => a.split('/').length - b.split('/').length || a.localeCompare(b));
   const files: LockFileResult[] = [];
   const dependencies: Dependency[] = [];
-  const covered: Record<Family, Set<string>> = { node: new Set(), php: new Set(), python: new Set(), rust: new Set() };
+  const covered: Record<Family, Set<string>> = { node: new Set(), php: new Set(), python: new Set(), rust: new Set(), ruby: new Set() };
   const below = (location: string) => locations.filter(other => other !== location && (!location || other.startsWith(`${location}/`)));
   // Reads a small file of the project, or null when it is missing or cannot be read safely.
   const readText = async (path: string, max = manifestLimit) => readSafe(project.path, join(project.path, path), max).catch(() => null);
@@ -121,13 +126,32 @@ export async function readDependencies(project: Pick<Project, 'path' | 'componen
         parsed?.members.forEach(member => covered.rust.add(member));
       } else if (await has('Cargo.toml')) noLock(location, 'Cargo.toml', 'rust');
     }
+    // go.mod is both the manifest and the record of selected versions.
+    if (await has('go.mod')) await read(location, 'go.mod', null, lock => parseGoMod(lock, location), 'Go modules');
+
+    if (await has('Gemfile.lock')) await read(location, 'Gemfile.lock', 'Gemfile', (lock, manifest) => parseGemfileLock(lock, manifest, location), 'Bundler');
+    else if (await has('Gemfile')) noLock(location, 'Gemfile', 'ruby');
+
+    if (await has('pom.xml')) {
+      // Parent POMs inside the project lend their properties and managed versions. Each is hashed so a change is noticed.
+      const parents = new Map<string, string>();
+      let current = await readText(posix.join(location, 'pom.xml'), lockLimit);
+      for (let pomDir = location; current !== null && parents.size < 5;) {
+        const parentPath = parentPomPath(current, pomDir);
+        if (!parentPath || parents.has(parentPath) || parentPath === posix.join(location, 'pom.xml')) break;
+        current = await readText(parentPath, lockLimit);
+        if (current !== null) { parents.set(parentPath, current); pomDir = posix.dirname(parentPath) === '.' ? '' : posix.dirname(parentPath); }
+      }
+      await read(location, 'pom.xml', null, lock => parsePom(lock, location, [...parents.values()]), 'Maven (pom.xml)', parents);
+    }
+
     // Known formats outside the parser set remain visible; a successful npm lock must not hide them.
     const names = (await readdir(dir).catch(() => [] as string[])).sort();
     const unsupported = [
       { format: 'SwiftPM', names: names.filter(name => name === 'Package.swift' || name === 'Package.resolved') },
-      { format: 'Go', names: names.filter(name => ['go.mod', 'go.sum', 'go.work'].includes(name)) },
-      { format: 'Bundler', names: names.filter(name => name === 'Gemfile' || name === 'Gemfile.lock') },
-      { format: 'Maven / Gradle', names: names.filter(name => ['pom.xml', 'build.gradle', 'build.gradle.kts', 'gradle.lockfile'].includes(name)) },
+      // A workspace's modules are read from their own go.mod; replace directives in go.work are not applied.
+      { format: 'Go workspace', names: names.filter(name => name === 'go.work') },
+      { format: 'Gradle', names: names.filter(name => ['build.gradle', 'build.gradle.kts', 'gradle.lockfile'].includes(name)) },
       { format: 'NuGet', names: names.filter(name => ['packages.lock.json', 'packages.config'].includes(name) || name.endsWith('.csproj')) },
       { format: 'Bun / Deno', names: names.filter(name => ['bun.lock', 'bun.lockb', 'deno.lock'].includes(name)) },
     ];
@@ -140,8 +164,8 @@ export async function readDependencies(project: Pick<Project, 'path' | 'componen
 
 /** Derives the project-level status from per-file results. Safe to re-run on older snapshots. */
 export function dependencyStatusOf(files: LockFileResult[]): DependencyStatus {
-  const readCount = files.filter(f => f.status === 'ok' || f.status === 'mismatch' || f.status === 'unpinned').length;
-  const failed = files.filter(f => !['ok', 'mismatch', 'unpinned', 'no-lock'].includes(f.status)).length;
+  const readCount = files.filter(f => readFileStatuses.includes(f.status)).length;
+  const failed = files.filter(f => !readFileStatuses.includes(f.status) && f.status !== 'no-lock').length;
   return readCount ? (failed ? 'partial' : 'complete') : failed ? 'failed' : 'no-lock';
 }
 

@@ -88,7 +88,7 @@ export function DependencyCoverage({ projects, reading, onRead }: { projects: Pr
               {(Object.keys(filterLabels) as Filter[]).map(key => <NativeSelectOption key={key} value={key}>{filterLabels[key]}</NativeSelectOption>)}
             </NativeSelect></div>
           <div className="flex min-w-[220px] flex-1 flex-col gap-2 max-md:min-w-0 max-md:w-full"><Label htmlFor={`${id}-text`}>アプリ名・パスで絞り込み</Label>
-            <Input id={`${id}-text`} value={text} disabled={locked} onChange={e => { setText(e.target.value); setPage(0); reset(); }} autoComplete="off" spellCheck={false} /></div>
+            <Input id={`${id}-text`} value={text} disabled={locked} placeholder="アプリ名やフォルダのパス" onChange={e => { setText(e.target.value); setPage(0); reset(); }} autoComplete="off" spellCheck={false} /></div>
           <div className="flex min-h-10 items-center gap-2 max-md:min-h-11"><Checkbox id={`${id}-archived`} checked={archived} disabled={locked} onCheckedChange={on => { setArchived(on === true); setPage(0); reset(); }} />
             <Label htmlFor={`${id}-archived`} className="text-xs">アーカイブも含める</Label></div>
         </div>

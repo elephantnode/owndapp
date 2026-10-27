@@ -7,12 +7,18 @@ const severityText: Record<Severity, string> = { malicious: '悪意のあるパ�
 // Where a direct dependency is declared, and how to find what pulls in an indirect one, by the lockfile it was read from.
 function manifestOf(d: Dependency) {
   if (d.ecosystem === 'crates.io') return 'Cargo.toml（workspaceの定義を含む）';
+  if (d.ecosystem === 'Go') return 'go.mod';
+  if (d.ecosystem === 'RubyGems') return 'Gemfile';
+  if (d.ecosystem === 'Maven') return 'pom.xml（親POMの dependencyManagement を含む）';
   if (d.ecosystem === 'Packagist') return 'composer.json';
   if (d.ecosystem === 'PyPI') return /requirements[^/]*\.txt$/i.test(d.file) ? d.file.split('/').pop()! : /Pipfile\.lock$/.test(d.file) ? 'Pipfile' : 'pyproject.toml';
   return 'package.json';
 }
 function whyCommand(d: Dependency) {
   if (d.ecosystem === 'crates.io') return `cargo tree --locked --offline --workspace --invert ${d.name}@${d.version}`;
+  if (d.ecosystem === 'Go') return `go mod why -m ${d.name}`;
+  if (d.ecosystem === 'RubyGems') return `bundle exec gem dependency --reverse-dependencies ${d.name}`;
+  if (d.ecosystem === 'Maven') return `mvn dependency:tree -Dincludes=${d.name}`;
   if (d.ecosystem === 'Packagist') return `composer why ${d.name}`;
   if (d.ecosystem === 'PyPI') return /uv\.lock$/.test(d.file) ? `uv tree --invert --package ${d.name}` : /poetry\.lock$/.test(d.file) ? `poetry show --why ${d.name}` : 'pipenv graph --reverse';
   return /yarn\.lock$/.test(d.file) ? `yarn why ${d.name}` : /pnpm-lock\.yaml$/.test(d.file) ? `pnpm why ${d.name}` : `npm ls ${d.name}`;

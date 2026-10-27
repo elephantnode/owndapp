@@ -68,6 +68,9 @@ npm start
 | PHP | `composer.lock` |
 | Python | `poetry.lock`・`uv.lock`・`Pipfile.lock`・`requirements*.txt` |
 | Rust | `Cargo.lock` |
+| Go | `go.mod` |
+| Ruby | `Gemfile.lock` |
+| Java（Maven） | `pom.xml`（直接依存のみ） |
 
 アプリの検出に対応する言語と、依存の解析に対応する形式は異なります。未読・未対応・読み取り失敗は区別して表示します。検索0件や検出0件でも、未確認の構成まで安全と判定するものではありません。対象形式の詳細は[実装済み機能](docs/features.md)と[依存解析の対応範囲](docs/dependency-coverage.md)を参照してください。
 

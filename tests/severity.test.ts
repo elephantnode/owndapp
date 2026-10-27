@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { roundup, scoreCvss3, scoreSeverityEntry } from '../server/cvss.js';
+import { scoreCvss4 } from '../server/cvss4.js';
 import { dedupe, mergeAdvisories, toAdvisory, type OsvRecord } from '../server/osv.js';
 
 const score = (vector: string) => { const r = scoreCvss3(vector); assert.ok(r.ok, `${vector}: ${!r.ok && r.reason}`); return r; };
@@ -40,7 +41,7 @@ test('不正なベクトルは採点せず、理由を残す', () => {
   const v2 = scoreSeverityEntry('CVSS_V2', 'AV:N/AC:L/Au:N/C:P/I:P/A:P');
   assert.ok(!v2.ok && /v2/.test(v2.reason));
   const v4 = scoreSeverityEntry('CVSS_V4', 'CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N');
-  assert.ok(!v4.ok && /v4/.test(v4.reason));
+  assert.ok(v4.ok && v4.version === '4.0' && v4.score === 9.3 && v4.severity === 'critical');
   // Plain numbers from 0 to 10 are scores on the v3 scale. v2 numbers use another scale.
   const numeric = scoreSeverityEntry('CVSS_V3', '7.5');
   assert.ok(numeric.ok && numeric.score === 7.5 && numeric.severity === 'high');
@@ -66,10 +67,36 @@ test('データベースのラベルとCVSSのうち高い方を採り、出所�
   assert.equal(labelled.severitySource, 'PyPI Advisory Database');
 });
 
+test('CVSS v4.0 を公式の計算機と同じ値で採点する', () => {
+  const v4 = (vector: string) => { const r = scoreCvss4(vector); assert.ok(r.ok, `${vector}: ${!r.ok && r.reason}`); return r.score; };
+  // Expected values come from the FIRST / Red Hat reference calculator.
+  assert.equal(v4('CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N'), 9.3);
+  assert.equal(v4('CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:P/VC:L/VI:L/VA:N/SC:N/SI:N/SA:N'), 5.3);
+  assert.equal(v4('CVSS:4.0/AV:L/AC:H/AT:P/PR:H/UI:A/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N'), 1);
+  // Threat, environmental, and supplemental metrics.
+  assert.equal(v4('CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N/E:U'), 8.1);
+  assert.equal(v4('CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N/CR:L/IR:L/AR:L/MAV:P'), 5.1);
+  assert.equal(v4('CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:N/SC:H/SI:H/SA:H/MSI:S'), 9.1);
+  assert.equal(v4('CVSS:4.0/AV:A/AC:H/AT:N/PR:L/UI:P/VC:H/VI:L/VA:L/SC:L/SI:L/SA:N/E:P/AU:Y/U:Red'), 1.6);
+  // 8.55 computed in floating point is 8.549999...; it still rounds half up.
+  assert.equal(v4('CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:P/VC:N/VI:L/VA:H/SC:H/SI:H/SA:H'), 8.6);
+  const none = scoreCvss4('CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:N/SC:N/SI:N/SA:N');
+  assert.ok(none.ok && none.score === 0 && none.severity === null);
+  // The specification fixes the metric order. Missing, misordered, repeated, or unknown metrics are malformed.
+  for (const vector of ['CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N', 'CVSS:4.0/AC:L/AV:N/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N',
+    'CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N/E:A/E:A', 'CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:S/SA:N',
+    'CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N/ZZ:1', 'CVSS:4.1/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N']) {
+    assert.equal(scoreCvss4(vector).ok, false, vector);
+  }
+  // In an advisory, a v4.0 vector now gives a severity of its own.
+  const advisory = toAdvisory('GHSA-v4', record('GHSA-v4', cvss('CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N')), 'x', '1.0.0');
+  assert.equal(advisory.severity, 'critical'); assert.equal(advisory.severitySource, 'CVSS v4.0'); assert.equal(advisory.severityScore, 9.3);
+});
+
 test('採点できないCVSSは不明のまま、理由を付ける', () => {
-  const v4 = toAdvisory('GHSA-v4', record('GHSA-v4', cvss('CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N')), 'x', '1.0.0');
-  assert.equal(v4.severity, 'unknown'); assert.equal(v4.severitySource, null); assert.match(v4.severityReason!, /v4/);
-  assert.equal(v4.cvss, 'CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N', 'the published vector is still shown');
+  const v4 = toAdvisory('GHSA-v4', record('GHSA-v4', cvss('CVSS:4.0/AC:L/AV:N/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N')), 'x', '1.0.0');
+  assert.equal(v4.severity, 'unknown'); assert.equal(v4.severitySource, null); assert.match(v4.severityReason!, /基本値が欠けて/);
+  assert.equal(v4.cvss, 'CVSS:4.0/AC:L/AV:N/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N', 'the published vector is still shown');
   const v2 = toAdvisory('OSV-v2', record('OSV-v2', { severity: [{ type: 'CVSS_V2', score: 'AV:N/AC:L/Au:N/C:C/I:C/A:C' }] }), 'x', '1.0.0');
   assert.equal(v2.severity, 'unknown'); assert.match(v2.severityReason!, /v2/);
   const malformed = toAdvisory('GHSA-bad', record('GHSA-bad', cvss('CVSS:3.1/AV:N/AC:L')), 'x', '1.0.0');
@@ -143,7 +170,7 @@ test('affected[].severity は同じエコシステムと名前のパッケージ
   assert.equal(both.severity, 'critical'); assert.equal(both.severityConflict, true);
   // An unusable package-specific entry is reported with the package it was given for.
   const unsupported = toAdvisory('OSV-s', scoped([{ package: { ecosystem: 'npm', name: 'x' }, ranges: range, severity: [{ type: 'CVSS_V4', score: 'CVSS:4.0/AV:N' }] }]), 'x', '1.0.0');
-  assert.equal(unsupported.severity, 'unknown'); assert.match(unsupported.severityReason!, /v4.*（npm x 向け）/);
+  assert.equal(unsupported.severity, 'unknown'); assert.match(unsupported.severityReason!, /欠けて.*（npm x 向け）/);
 });
 
 test('想定外の形のJSONでも落ちず、不明として理由を残す', () => {
@@ -177,9 +204,9 @@ test('想定外の形のJSONでも落ちず、不明として理由を残す', (
 });
 
 test('使える重大度があっても、使えなかったCVSSの理由は残す', () => {
-  const v4 = toAdvisory('GHSA-l4', record('GHSA-l4', { database_specific: { severity: 'HIGH' }, ...cvss('CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N') }), 'x', '1.0.0');
+  const v4 = toAdvisory('GHSA-l4', record('GHSA-l4', { database_specific: { severity: 'HIGH' }, ...cvss('CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:Q/SC:N/SI:N/SA:N') }), 'x', '1.0.0');
   assert.equal(v4.severity, 'high'); assert.equal(v4.severitySource, 'GitHub Advisory Database'); assert.equal(v4.severityConflict, false);
-  assert.match(v4.severityReason!, /v4 のベクトルは未対応/);
+  assert.match(v4.severityReason!, /CVSS の値が不正です（VA:Q）/);
   const malformed = toAdvisory('GHSA-lm', record('GHSA-lm', { database_specific: { severity: 'LOW' }, ...cvss('CVSS:3.1/AV:N/AC:L') }), 'x', '1.0.0');
   assert.equal(malformed.severity, 'low'); assert.match(malformed.severityReason!, /欠けて/);
   // A conflict names both claims and keeps the limitation of a third one.
