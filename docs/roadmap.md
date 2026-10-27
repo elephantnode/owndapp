@@ -2,12 +2,12 @@
 
 更新日: 2026-10-27。利用者向けの導入・操作は[README](../README.md)、現在の詳しい対応範囲は[実装済み機能](features.md)を参照してください。この一覧は課題の整理で、すべての実装や公開時期を約束するものではありません。
 
-## 公開前に決めること
+## 公開まわり（2026-10-27完了）
 
-- MITライセンスを採用。配布先は `https://github.com/elephantnode/owndapp`。
-- GitHubの非公開脆弱性報告を有効化し、実際に報告窓口へ進めることを確認する（現在は無効）。有効化後に[SECURITY.md](../SECURITY.md)を更新する。
-- 公開用mainのCI（macOSとWindows experimental）成功、GitHubからの新規取得手順、v0.1.0 Releaseを確認する。詳細は[公開準備](release-readiness.md)。
-- Windowsは試験的対応のまま公開する。実機受け入れは公開後の課題とし、完了前に「Windows対応完了」とは扱わない。
+- MITライセンス。配布先は `https://github.com/elephantnode/owndapp`。
+- Private vulnerability reportingを有効化し、[SECURITY.md](../SECURITY.md)を更新済み。
+- 公開用mainのCI（macOSとWindows experimental）成功、GitHubからの新規取得、[v0.1.0](https://github.com/elephantnode/owndapp/releases/tag/v0.1.0)を公開済み。詳細は[公開準備](release-readiness.md)。
+- Windowsは試験的対応のまま公開した。実機受け入れは公開後の課題とし、完了前に「Windows対応完了」とは扱わない。
 
 ## 未対応の機能・解析
 
@@ -25,7 +25,7 @@
 ## 確認が残る環境
 
 - 導入検証はmacOS / Apple Siliconで実施。Intel Mac、他OS、全Node.js版の確認は未完了。
-- 公開配布URLからの新規取得と、Finderの実ダイアログ操作は、新規導入検証では未確認。
+- 公開配布URLからの新規取得（clone → build → start）は2026-10-27に確認。Finderの実ダイアログ操作は未確認。
 - 署名検証でのTUF鍵取得の警告と直接取得へのフォールバックは、[導入検証記録](install-verification.md)を参照。
 
 日付や対象コミットの異なる検証結果は、現在の全環境での動作や安全性の保証として扱わない。
