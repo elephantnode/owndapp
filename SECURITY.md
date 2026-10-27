@@ -6,7 +6,7 @@
 
 GitHubの[Security Advisories](https://github.com/elephantnode/owndapp/security/advisories)で **Report a vulnerability** を選び、非公開で報告してください。公開IssueやPull Requestには、悪用できる手順・認証情報・実データを投稿しないでください。
 
-**2026-10-26時点では非公開報告機能はまだ有効になっていません。** ボタンがない場合は、公開Issueには問題の詳細を書かず、「非公開報告窓口の有効化依頼」だけを投稿してください。窓口が有効になってから詳細を送ってください。
+非公開報告機能は有効です。アドバイザリページの **Report a vulnerability** から報告してください。ボタンが見えない場合は、公開Issueには問題の詳細を書かず、窓口の表示確認依頼だけを投稿してください。
 
 報告には次を含めてください。
 
