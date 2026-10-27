@@ -234,6 +234,35 @@ export class ScanJobs {
     return (this.db.prepare(`SELECT c.id FROM scan_job_candidates c WHERE ${where.sql} ORDER BY c.ord LIMIT ?`).all(...where.args, limit) as { id: string }[]).map(r => r.id);
   }
 
+  /**
+   * The candidates of several scans as one list, each path once: from the first scan in scanIds that has it, so passing
+   * the newest scan first shows a project found under two nested folders as its latest scan saw it.
+   */
+  combined(scanIds: string[], options: ScanPageOptions = {}) {
+    const { limit, offset, query, filter, exclusions } = pageOptions(options);
+    const count = (where: { sql: string; args: (string | number)[] }) => (this.db.prepare(`SELECT COUNT(*) AS n FROM ${where.sql}`).get(...where.args) as { n: number }).n;
+    const filtered = this.combinedWhere(scanIds, { exclusions, filter, query });
+    const rows = limit ? this.db.prepare(`SELECT c.payload, ${registeredColumns} FROM ${filtered.sql} ORDER BY c.rank, c.ord LIMIT ? OFFSET ?`)
+      .all(...filtered.args, limit, offset) as { payload: string; registered: number; inside: number }[] : [];
+    return { candidates: rows.map(r => pageCandidate(withRegistration(JSON.parse(r.payload), r))),
+      candidateCount: count(this.combinedWhere(scanIds, { exclusions, filter: 'all', query: '' })), filteredCount: count(filtered) };
+  }
+
+  /** Ids of the combined candidates matching the filters, in list order. */
+  combinedIds(scanIds: string[], options: ScanSelectOptions): string[] {
+    const { query, filter, exclusions } = pageOptions(options);
+    const limit = Math.min(10_000, Math.max(1, Math.trunc(Number(options.limit) || 2000)));
+    const where = this.combinedWhere(scanIds, { exclusions, filter, query });
+    return (this.db.prepare(`SELECT c.id FROM ${where.sql} ORDER BY c.rank, c.ord LIMIT ?`).all(...where.args, limit) as { id: string }[]).map(r => r.id);
+  }
+
+  /** The scan each combined candidate id comes from. Ids not in the combined list are left out. */
+  locate(scanIds: string[], ids: string[]): Map<string, string> {
+    const rows = this.db.prepare(`SELECT c.id, c.scan_id FROM ${this.deduplicated} WHERE c.rn = 1 AND c.id IN (SELECT value FROM json_each(?))`)
+      .all(JSON.stringify(scanIds), JSON.stringify(ids)) as { id: string; scan_id: string }[];
+    return new Map(rows.map(r => [r.id, r.scan_id]));
+  }
+
   /** Reads until every folder is read, or until signal aborts: reason 'pause' pauses, anything else cancels. Never rejects for scan failures. */
   async run(id: string, signal?: AbortSignal): Promise<void> {
     if (this.active) throw new CatalogError('現在の探索が終わるか、一時停止してから実行してください', 409);
@@ -739,12 +768,19 @@ export class ScanJobs {
     return [...fatal, ...this.db.prepare('SELECT path, message FROM scan_job_issues WHERE scan_id=? ORDER BY rowid LIMIT ?').all(row.id, limit - fatal.length) as { path: string; message: string }[]];
   }
 
-  private candidateWhere(id: string, { exclusions, filter, query }: { exclusions: string[]; filter: ScanFilter; query: string }) {
-    let sql = `c.scan_id = ? AND NOT EXISTS (SELECT 1 FROM json_each(?) e WHERE c.path = e.value OR (c.path > e.value || '/' AND c.path < e.value || '0'))`;
-    const args: (string | number)[] = [id, JSON.stringify(exclusions)];
-    if (query) { sql += ' AND instr(lower(c.search), lower(?)) > 0'; args.push(query); }
-    if (filter !== 'all') sql += ` AND ${filter === 'new' ? 'NOT ' : ''}EXISTS (SELECT 1 FROM projects p WHERE p.path = c.path)`;
-    return { sql, args };
+  private candidateWhere(id: string, options: { exclusions: string[]; filter: ScanFilter; query: string }) {
+    const filters = candidateFilters(options);
+    return { sql: `c.scan_id = ? AND ${filters.sql}`, args: [id, ...filters.args] };
+  }
+
+  // Candidate ids are hashes of their paths, so the same project found by two scans has the same id; rn 1 is the first scan's row.
+  // Rows are deduplicated before filtering, so an older row never stands in for a newer one that does not match.
+  private deduplicated = `(SELECT c.*, o.key AS rank, ROW_NUMBER() OVER (PARTITION BY c.path ORDER BY o.key) AS rn
+    FROM scan_job_candidates c JOIN json_each(?) o ON o.value = c.scan_id) c`;
+
+  private combinedWhere(scanIds: string[], options: { exclusions: string[]; filter: ScanFilter; query: string }) {
+    const filters = candidateFilters(options);
+    return { sql: `${this.deduplicated} WHERE c.rn = 1 AND ${filters.sql}`, args: [JSON.stringify(scanIds), ...filters.args] };
   }
 
   // Scans saved in full before DB-backed scans existed.
@@ -779,6 +815,15 @@ export class ScanJobs {
     return { ...scan, candidates: filtered.slice(offset, offset + limit).map(pageCandidate), issues: scan.issues.slice(0, 100),
       candidateCount: scan.candidates.filter(c => !isExcluded(exclusions, c.path)).length, filteredCount: filtered.length, issueCount: scan.issues.length };
   }
+}
+
+// Current exclusions, the search text and whether the path is registered, as SQL on candidate rows aliased c.
+function candidateFilters({ exclusions, filter, query }: { exclusions: string[]; filter: ScanFilter; query: string }) {
+  let sql = `NOT EXISTS (SELECT 1 FROM json_each(?) e WHERE c.path = e.value OR (c.path > e.value || '/' AND c.path < e.value || '0'))`;
+  const args: (string | number)[] = [JSON.stringify(exclusions)];
+  if (query) { sql += ' AND instr(lower(c.search), lower(?)) > 0'; args.push(query); }
+  if (filter !== 'all') sql += ` AND ${filter === 'new' ? 'NOT ' : ''}EXISTS (SELECT 1 FROM projects p WHERE p.path = c.path)`;
+  return { sql, args };
 }
 
 /** Paused, failed or cancelled: the saved queue and grouping position let run() continue. */

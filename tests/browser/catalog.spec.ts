@@ -478,7 +478,7 @@ test('登録してチェック・送信前の確認・同じ内容の読み直�
   await page.getByRole('button', { name: '探索フォルダと除外の一覧を隠す' }).click();
   await expect(folders).toBeHidden();
   await expect(page.getByRole('group', { name: '除外するフォルダ' })).toBeHidden();
-  await expect(page.getByText('表示中の結果')).toBeVisible();
+  await expect(page.getByText('直近の探索', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: /を再探索$/ })).toBeVisible();
   await page.getByRole('button', { name: '探索フォルダと除外の一覧を表示' }).click();
   await expect(folders).toBeVisible();
@@ -617,12 +617,41 @@ test('探索・除外フォルダをパス入力で追加し、無効な入力�
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.screenshot({ path: '/tmp/owndapp-folder-path-mobile.png' });
-  await page.route('**/api/scans/*', route => route.request().method() === 'GET' ? route.fulfill({ status: 503, json: { error: 'テスト用の再表示失敗' } }) : route.continue());
+  await page.route('**/api/candidates?*', route => route.fulfill({ status: 503, json: { error: 'テスト用の再表示失敗' } }));
   await dialog.getByRole('button', { name: '除外フォルダを追加', exact: true }).click();
   await expect(dialog).toHaveCount(0);
   await expect(page.getByRole('group', { name: '除外するフォルダ', exact: true })).toContainText('ignored folder');
   await expect(page.getByRole('alert')).toContainText('除外設定は保存しましたが');
-  await page.unroute('**/api/scans/*');
+  await page.unroute('**/api/candidates?*');
+});
+
+test('すべての探索フォルダを順に探索し、候補を1つの一覧から登録できる', async ({ page }) => {
+  const base = process.env.OWNDAPP_TEST_ROOT! + '-all-folders';
+  for (const folder of ['first', 'second']) {
+    mkdirSync(join(base, folder, `sweep-${folder}`), { recursive: true });
+    writeFileSync(join(base, folder, `sweep-${folder}`, 'package.json'), JSON.stringify({ name: `sweep-${folder}` }));
+  }
+  await page.goto('/#discover');
+  for (const folder of ['first', 'second']) {
+    await page.getByRole('button', { name: '探索フォルダをパスで追加', exact: true }).click();
+    await page.getByRole('dialog').getByRole('textbox', { name: 'フォルダのパス' }).fill(join(base, folder));
+    await page.getByRole('dialog').getByRole('button', { name: '追加して探索' }).click();
+    await expect(page.getByText('探索完了', { exact: true })).toBeVisible();
+  }
+  // A project added after the first scans is found by scanning everything again.
+  mkdirSync(join(base, 'first', 'sweep-later'), { recursive: true });
+  writeFileSync(join(base, 'first', 'sweep-later', 'package.json'), JSON.stringify({ name: 'sweep-later' }));
+  await page.getByRole('button', { name: 'すべて探索', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'すべて探索', exact: true })).toBeEnabled({ timeout: 15_000 });
+  const found = page.getByRole('region', { name: '見つかった候補' });
+  await expect(found).toContainText('すべての探索フォルダの候補');
+  await found.getByRole('textbox', { name: '候補を絞り込み' }).fill('sweep-');
+  for (const name of ['sweep-first', 'sweep-second', 'sweep-later']) await expect(found.getByRole('checkbox', { name: `${name}を登録候補に選択` })).toBeVisible();
+  await page.getByLabel(/表示中の新規候補をすべて選択/).click();
+  await expect(page.getByText('3件を選択')).toBeVisible();
+  await page.getByRole('button', { name: '選択した候補を登録', exact: true }).click();
+  await expect(page.getByText('今回追加したアプリを表示しています')).toBeVisible();
+  for (const name of ['sweep-first', 'sweep-second', 'sweep-later']) await expect(page.getByRole('link', { name, exact: true })).toBeVisible();
 });
 
 test('重大度不明は要確認として絞り込め、緊急を先に表示する', async ({ page, request }) => {
@@ -811,8 +840,15 @@ test('登録後の次の操作を案内し、除外とカタログ登録解除�
 
 test('メインメニューから依存検索を開き、部分名でスコープ付きパッケージを探せる', async ({ page }) => {
   await page.goto('/#home');
+  await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+  // The next screen opens at the top even when the previous one was scrolled to the bottom.
+  await page.setViewportSize({ width: 1280, height: 400 });
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
   await page.getByRole('navigation', { name: 'メインメニュー' }).getByRole('link', { name: '依存検索', exact: true }).click();
   await expect(page.getByRole('heading', { name: '依存検索', exact: true, level: 1 })).toBeVisible();
+  expect(await page.evaluate(() => window.scrollY)).toBe(0);
+  await page.setViewportSize({ width: 1440, height: 1000 });
   // A single text box: no separate matching or version fields.
   await expect(page.getByRole('search').getByRole('textbox')).toHaveCount(1);
   await page.getByLabel('パッケージ名', { exact: true }).fill('SHARED');

@@ -491,8 +491,33 @@ export function createApi(store: Store, port = 4310, pickFolder: FolderPicker = 
     scanTasks.set(id, task); void task.catch(() => {});
   };
   const requireStopped = () => {
-    if (scanTasks.size) throw new CatalogError('現在の探索が終わるか、一時停止してから実行してください', 409);
+    if (scanTasks.size || sweep?.status === 'running') throw new CatalogError('現在の探索が終わるか、一時停止してから実行してください', 409);
   };
+  // Scanning every registered folder, one after another. Kept in memory: after a restart the scan in progress is paused
+  // as usual, and the folders already scanned keep their results.
+  type Sweep = { status: 'running' | 'completed' | 'stopped'; roots: string[]; done: number; scanId: string | null; skipped: string[]; startedAt: string; endedAt: string | null };
+  let sweep: Sweep | null = null;
+  const runSweep = async (current: Sweep) => {
+    for (const root of current.roots) {
+      let path: string | null = null;
+      try { path = await canonicalRoot(root); } catch { /* missing or unreadable: skipped below */ }
+      const exclusions = store.exclusions();
+      if (!path || isExcluded(exclusions, path)) { current.skipped.push(root); current.done++; continue; }
+      let scan: Scan;
+      try { scan = jobs.create(path, exclusions); } catch { break; }
+      current.scanId = scan.id; launchScan(scan.id);
+      await scanTasks.get(scan.id)?.catch(() => {});
+      current.done++;
+      // Pausing or cancelling the scan in progress stops the rest too.
+      const status = jobs.get(scan.id, { limit: 0 })?.status;
+      if (status === 'paused' || status === 'cancelled') break;
+    }
+    current.status = current.done === current.roots.length ? 'completed' : 'stopped';
+    current.endedAt = new Date().toISOString();
+  };
+  // The latest DB-backed scan of every registered folder, newest first.
+  const latestScans = () => (store.db.prepare(`SELECT j.id FROM scan_jobs j JOIN scan_roots r ON r.path = j.root
+    WHERE j.started_at = (SELECT MAX(k.started_at) FROM scan_jobs k WHERE k.root = j.root) ORDER BY j.started_at DESC`).all() as { id: string }[]).map(r => r.id);
   app.get('/api/scan-history', c => {
     const offset = Math.max(0, Math.floor(Number(c.req.query('offset')) || 0));
     const rows = store.db.prepare(`SELECT id, json_extract(payload,'$.root') AS root, json_extract(payload,'$.status') AS status,
@@ -533,6 +558,26 @@ export function createApi(store: Store, port = 4310, pickFolder: FolderPicker = 
     store.addScanRoot(root);
     const scan = jobs.create(root, exclusions); launchScan(scan.id);
     return c.json({ scan }, 202);
+  });
+  app.post('/api/scans/sweep', c => {
+    requireStopped();
+    const exclusions = store.exclusions();
+    const roots = store.scanRoots().map(root => root.path).filter(path => !isExcluded(exclusions, path));
+    if (!roots.length) throw new CatalogError('探索できるフォルダがありません。先に探索するフォルダを追加してください');
+    const current: Sweep = { status: 'running', roots, done: 0, scanId: null, skipped: [], startedAt: new Date().toISOString(), endedAt: null };
+    sweep = current; void runSweep(current);
+    return c.json({ sweep: current }, 202);
+  });
+  app.get('/api/scans/sweep', c => c.json({ sweep }));
+  // Every registered folder's latest result as one list. Folders never scanned, or last scanned before DB-backed scans, are counted apart.
+  app.get('/api/candidates', c => {
+    const scanIds = latestScans();
+    return c.json({ ...jobs.combined(scanIds, scanOptions(c.req.query())), folders: { total: store.scanRoots().length, scanned: scanIds.length } });
+  });
+  app.get('/api/candidates/selection', c => {
+    const ids = jobs.combinedIds(latestScans(), { ...scanOptions(c.req.query()), limit: 2001 });
+    if (ids.length > 2000) throw new CatalogError('一度に選べるのは2000件までです。検索条件を絞るか、ページごとに選んでください');
+    return c.json({ ids });
   });
   app.get('/api/scans/:id', c => {
     const scan = jobs.get(c.req.param('id'), scanOptions(c.req.query()));
@@ -595,14 +640,19 @@ export function createApi(store: Store, port = 4310, pickFolder: FolderPicker = 
       !input.candidateIds.length || input.candidateIds.length > 2000 || input.candidateIds.some(id => typeof id !== 'string')) throw new CatalogError('追加する候補を確認してください');
     const previous = store.previousImport(input.id); if (previous) return c.json(previous);
     requireStopped();
-    const scan = findScan(input.scanId); if (!scan || scan.status === 'running' || scan.status === 'failed') throw new CatalogError('完了した探索結果から選んでください');
-    const candidates = [...new Set(input.candidateIds)].map(id => jobs.candidate(scan.id, id));
-    if (candidates.some(candidate => !candidate)) throw new CatalogError('候補が見つかりません。再探索してください');
+    // Without scanId the candidates come from the combined list of every folder's latest scan.
+    const ids = [...new Set(input.candidateIds)];
+    const located = input.scanId === undefined ? jobs.locate(latestScans(), ids) : new Map(ids.map(id => [id, input.scanId]));
+    const scans = new Map([...new Set(located.values())].map(id => [id, findScan(id)]));
+    if ([...scans.values()].some(scan => !scan || scan.status === 'running' || scan.status === 'failed')) throw new CatalogError('完了した探索結果から選んでください');
+    const candidates = ids.map(id => { const scanId = located.get(id); return scanId ? jobs.candidate(scanId, id) : undefined; });
+    if (!candidates.length || candidates.some(candidate => !candidate)) throw new CatalogError('候補が見つかりません。再探索してください');
     const exclusions = store.exclusions();
     if (candidates.some(candidate => isExcluded(exclusions, candidate!.path))) throw new CatalogError('除外設定に含まれる候補があります。選択を確認してください', 409);
     // Check every candidate so the error can name all of the changed folders at once.
     const changed: string[] = []; const checked: Candidate[] = [];
-    for (const candidate of candidates) {
+    for (const [index, candidate] of candidates.entries()) {
+      const scan = scans.get(located.get(ids[index])!)!;
       try { const refreshed = scan.persistent ? await revalidatePersistent(candidate!, exclusions) : await revalidateCandidate(scan.root, candidate!, exclusions); checked.push(candidate!.incomplete ? { ...refreshed, incomplete: undefined } : candidate!); }
       catch { changed.push(candidate!.path); }
     }
@@ -614,6 +664,7 @@ export function createApi(store: Store, port = 4310, pickFolder: FolderPicker = 
     return c.json(result, 201);
   });
   return Object.assign(app, { shutdownScans: async () => {
+    if (sweep?.status === 'running') sweep.status = 'stopped';
     for (const controller of controllers.values()) controller.abort('pause');
     await Promise.allSettled([...scanTasks.values()]);
   } });

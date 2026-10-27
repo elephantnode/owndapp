@@ -6,8 +6,8 @@ import { UsageGuide } from './UsageGuide';
 import { FolderPathDialog } from './FolderPathDialog';
 import type { ScanCandidate } from '../shared/scan-jobs';
 import { GuardPanel } from './GuardPanel';
-import { useEffect, useId, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { House, Archive, ArrowLeft, ArrowRight, Check, ChevronDown, ClipboardCheck, Copy, ChevronRight, CircleAlert, ClipboardList, EyeOff, FileCode2, Folder, FolderMinus, GitBranch, Globe, FolderOpen, FolderSearch, FolderTree, FolderX, Layers, ListChecks, Package, PackageSearch, RefreshCw, LayoutList, Plus, Search, Settings, ShieldAlert, ShieldCheck, ShieldQuestion, SquareCode, SquareTerminal, Tag, X } from 'lucide-react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { House, Archive, ArrowLeft, ArrowRight, Check, ChevronDown, ChevronLeft, ClipboardCheck, Copy, ChevronRight, CircleAlert, ClipboardList, EyeOff, FileCode2, Folder, FolderMinus, GitBranch, Globe, FolderOpen, FolderSearch, FolderTree, FolderX, Layers, ListChecks, Package, PackageSearch, RefreshCw, LayoutList, Plus, Search, Settings, ShieldAlert, ShieldCheck, ShieldQuestion, SquareCode, SquareTerminal, Tag, X } from 'lucide-react';
 import { connect, request } from './api';
 import { appRoleLabels, ecosystemLabels, exposureLabels, lifecycleLabels, priorityLabels, responseLabels, type AppRole, type Exposure, type GitObservation, type GitStatus, type QueueItem, type ResponseStatus, type Candidate, type Dependency, type DependencySnapshot, type DependencyStatus, type Ecosystem, type Severity, type VulnerabilityCheck, type VulnerabilityFinding, type VulnerabilitySummary, type Lifecycle, type OpenApps, type Project, type ProjectEdit, type Scan } from '../shared/types';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -694,11 +694,22 @@ export function App() {
   useEffect(() => {
     if (!scanRunning || !initialScan) return;
     const id = initialScan.id; let alive = true;
-    const timer = setInterval(() => { void request<{ scan: Scan }>(`/scans/${id}`).then(({ scan }) => {
+    const timer = setInterval(() => { void request<{ scan: Scan }>(`/scans/${id}`).then(async ({ scan }) => {
       if (!alive) return;
+      if (scan.status === 'running') { setInitialScan(scan); return; }
+      // While every folder is being scanned, the banner moves on to the next folder.
+      const { sweep } = await request<{ sweep: Sweep | null }>('/scans/sweep').catch(() => ({ sweep: null }));
+      if (!alive) return;
+      if (sweep?.status === 'running') {
+        // Until the next folder's scan starts, keep watching this one.
+        const next = sweep.scanId && sweep.scanId !== id ? await request<{ scan: Scan }>(`/scans/${sweep.scanId}?limit=0`).catch(() => null) : null;
+        if (alive && next) setInitialScan(next.scan);
+        return;
+      }
       setInitialScan(scan);
       // The banner goes away when the scan ends, so say how it ended.
-      if (scan.status !== 'running') setNotice(`${scan.root} の探索が終わりました（${scanLabels[scan.status]}・候補${scan.candidateCount ?? scan.candidates.length}件）。「アプリを追加」で候補を選べます`);
+      setNotice(sweep && sweep.scanId === id && sweep.roots.length > 1 ? `すべてのフォルダの探索が終わりました（${sweep.done} / ${sweep.roots.length}フォルダ）。「アプリを追加」で候補を選べます`
+        : `${scan.root} の探索が終わりました（${scanLabels[scan.status]}・候補${scan.candidateCount ?? scan.candidates.length}件）。「アプリを追加」で候補を選べます`);
     }, () => {}); }, 1000);
     return () => { alive = false; clearInterval(timer); };
   }, [scanRunning, initialScan?.id]);
@@ -812,6 +823,8 @@ export function App() {
     };
     route(); window.addEventListener('hashchange', route); return () => window.removeEventListener('hashchange', route);
   }, []);
+  // Every screen and project detail opens at the top, not where the previous one was scrolled to.
+  useLayoutEffect(() => { window.scrollTo(0, 0); }, [view, detail]);
   function navigate(next: View) {
     if (unsaved.current && !window.confirm('保存していない変更があります。別の画面へ移動しますか？')) return false;
     // Notices belong to the screen they came from. Callers that report a result set it after navigating.
@@ -1226,6 +1239,11 @@ function Discovery({ initial, imported, changed, exclusionsChanged, showExcluded
   const [registeredInside, setRegisteredInside] = useState(0);
   const [roots, setRoots] = useState<ScanRoot[] | null>(null);
   const [adding, setAdding] = useState<'register' | 'check' | null>(null);
+  // Candidates are listed from every folder's latest scan together. detail shows one scan instead, picked from a folder or the history.
+  const [detail, setDetail] = useState(false);
+  const [combined, setCombined] = useState<CombinedCandidates | null>(null);
+  const [combinedKey, setCombinedKey] = useState(0);
+  const [sweep, setSweep] = useState<Sweep | null>(null);
   // The folder and exclusion lists fold away so a long list does not push the new candidates down. The choice is remembered per browser;
   // until one is made, they start folded only when a result is shown under a long list.
   const [settingsOpen, setSettingsOpen] = useState<boolean | null>(() => { try { const saved = localStorage.getItem('owndapp.discoverySettings'); return saved ? saved === 'open' : null; } catch { return null; } });
@@ -1237,7 +1255,19 @@ function Discovery({ initial, imported, changed, exclusionsChanged, showExcluded
   const loadRoots = () => request<{ roots: ScanRoot[] }>('/scan-roots').then(d => setRoots(d.roots), e => setError(e.message));
   useEffect(() => { void loadRoots(); }, []);
   // A finished scan changes its folder's summary.
-  useEffect(() => { if (scan && scan.status !== 'running') void loadRoots(); }, [scan?.id, scan?.status]);
+  useEffect(() => { if (scan && scan.status !== 'running') { void loadRoots(); setCombinedKey(k => k + 1); } }, [scan?.id, scan?.status]);
+  // A scan of every folder runs one folder after another; the screen follows each scan in turn.
+  useEffect(() => { void request<{ sweep: Sweep | null }>('/scans/sweep').then(d => setSweep(d.sweep), () => {}); }, []);
+  useEffect(() => {
+    if (sweep?.status !== 'running') return;
+    let alive = true;
+    const interval = setInterval(() => { void request<{ sweep: Sweep | null }>('/scans/sweep').then(async ({ sweep: latest }) => {
+      if (!alive) return;
+      setSweep(latest);
+      if (latest?.scanId && latest.scanId !== scan?.id) { const { scan: next } = await request<{ scan: Scan }>(`/scans/${latest.scanId}?limit=0`); if (alive) { setScan(next); changed(next); setRoot(next.root); } }
+    }).catch(() => {}); }, 600);
+    return () => { alive = false; clearInterval(interval); };
+  }, [sweep?.status, scan?.id]);
   useEffect(() => { void request<{ exclusions: string[] }>('/exclusions').then(d => setExclusions(d.exclusions)).catch(e => setError(e.message)); }, []);
   useEffect(() => {
     if (!initial) return;
@@ -1251,26 +1281,37 @@ function Discovery({ initial, imported, changed, exclusionsChanged, showExcluded
     const interval = setInterval(() => { void request<{ scan: Scan }>(`/scans/${id}?limit=30`).then(({ scan }) => { if (alive) { setScan(scan); changed(scan); setError(''); } }).catch(e => { if (alive) setError(e.message); }); }, 600);
     return () => { alive = false; clearInterval(interval); };
   }, [scan?.id, scan?.status]);
+  const showingAll = !detail || !scan;
   useEffect(() => {
-    if (!scan || scan.status === 'running' || !scan.persistent) return;
+    if (!showingAll) return;
+    let alive = true; setPageLoading(true);
+    const params = new URLSearchParams({ limit: '30', offset: String(page * 30), filter, q: query });
+    void request<CombinedCandidates>(`/candidates?${params}`).then(data => {
+      if (alive) { setCombined(data); setError(''); if (page > 0 && !data.candidates.length) setPage(0); }
+    }, e => { if (alive) setError(e.message); }).finally(() => { if (alive) setPageLoading(false); });
+    return () => { alive = false; };
+  }, [showingAll, page, filter, query, combinedKey]);
+  useEffect(() => {
+    if (showingAll || !scan || scan.status === 'running' || !scan.persistent) return;
     let alive = true; setPageLoading(true);
     const params = new URLSearchParams({ limit: '30', offset: String(page * 30), filter, q: query });
     void request<{ scan: Scan }>(`/scans/${scan.id}?${params}`).then(({ scan: latest }) => {
       if (alive) { setScan(latest); setError(''); if (page > 0 && !latest.candidates.length) setPage(0); }
     }, e => { if (alive) setError(e.message); }).finally(() => { if (alive) setPageLoading(false); });
     return () => { alive = false; };
-  }, [scan?.id, scan?.status, scan?.persistent, page, filter, query]);
-  const rows = scan?.persistent ? scan.candidates : (scan?.candidates || []).filter(c => (filter === 'all' || (filter === 'registered' ? c.registered : !c.registered)) && [c.name, c.path, ...c.technologies].join(' ').toLowerCase().includes(query.toLowerCase()));
-  const totalRows = scan?.persistent ? scan.filteredCount ?? rows.length : rows.length;
-  const pageRows = scan?.persistent ? rows : rows.slice(page * 30, (page + 1) * 30);
+  }, [showingAll, scan?.id, scan?.status, scan?.persistent, page, filter, query]);
+  const paged = showingAll || !!scan?.persistent;
+  const rows = showingAll ? combined?.candidates ?? [] : scan?.persistent ? scan.candidates : (scan?.candidates || []).filter(c => (filter === 'all' || (filter === 'registered' ? c.registered : !c.registered)) && [c.name, c.path, ...c.technologies].join(' ').toLowerCase().includes(query.toLowerCase()));
+  const totalRows = showingAll ? combined?.filteredCount ?? 0 : scan?.persistent ? scan.filteredCount ?? rows.length : rows.length;
+  const pageRows = paged ? rows : rows.slice(page * 30, (page + 1) * 30);
   const selectable = rows.filter(c => !c.registered);
   const selectedVisible = selectable.filter(c => selected.has(c.id)).length;
   async function selectAll(on: boolean) {
-    if (!scan?.persistent) { choose(selectable.map(c => c.id), on); return; }
+    if (!paged) { choose(selectable.map(c => c.id), on); return; }
     setBusy(true); setError('');
     try {
       const params = new URLSearchParams({ filter: 'new', q: query });
-      const { ids } = await request<{ ids: string[] }>(`/scans/${scan.id}/selection?${params}`);
+      const { ids } = await request<{ ids: string[] }>(`${showingAll ? '/candidates' : `/scans/${scan!.id}`}/selection?${params}`);
       choose(ids, on);
     } catch (e) { setError((e as Error).message); }
     finally { setBusy(false); }
@@ -1293,13 +1334,19 @@ function Discovery({ initial, imported, changed, exclusionsChanged, showExcluded
   }
   async function start(folder: string, errorInDialog = false) {
     setError(''); setBusy(true);
-    try { const { scan } = await request<{ scan: Scan }>('/scans', { root: folder }); setRoot(scan.root); setQuery(''); setFilter('new'); setScan(scan); changed(scan); setSelected(new Set()); setPage(0); importId.current = crypto.randomUUID(); void loadRoots(); return null; }
+    try { const { scan } = await request<{ scan: Scan }>('/scans', { root: folder }); setRoot(scan.root); setQuery(''); setFilter('new'); setDetail(false); setScan(scan); changed(scan); setSelected(new Set()); setPage(0); importId.current = crypto.randomUUID(); void loadRoots(); return null; }
     catch (e) { if (!errorInDialog) setError((e as Error).message); return (e as Error).message; } finally { setBusy(false); }
   }
   async function show(id: string) {
     setError(''); setQuery('');
-    try { const { scan } = await request<{ scan: Scan }>(`/scans/${id}?limit=30&filter=new`); setRoot(scan.root); setScan(scan); changed(scan); setSelected(new Set()); setPage(0); setFilter('new'); importId.current = crypto.randomUUID(); }
+    try { const { scan } = await request<{ scan: Scan }>(`/scans/${id}?limit=30&filter=new`); setRoot(scan.root); setScan(scan); changed(scan); setDetail(true); setSelected(new Set()); setPage(0); setFilter('new'); importId.current = crypto.randomUUID(); }
     catch (e) { setError((e as Error).message); }
+  }
+  function showAll() { setDetail(false); setSelected(new Set()); setPage(0); setFilter('new'); setQuery(''); importId.current = crypto.randomUUID(); }
+  async function scanEverything() {
+    setError(''); setBusy(true);
+    try { const data = await request<{ sweep: Sweep }>('/scans/sweep', {}); setSweep(data.sweep); setDetail(false); setSelected(new Set()); setPage(0); importId.current = crypto.randomUUID(); }
+    catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   }
   async function unregister(path: string) {
     setError('');
@@ -1313,7 +1360,7 @@ function Discovery({ initial, imported, changed, exclusionsChanged, showExcluded
       if (path) await start(path);
     } catch (e) { setError((e as Error).message); } finally { setPicking(false); }
   }
-  const locked = busy || picking || scan?.status === 'running';
+  const locked = busy || picking || scan?.status === 'running' || sweep?.status === 'running';
   // The server drops excluded candidates from the scan result, so refreshing it applies the change without a rescan.
   async function changeExclusions(path: string, action: 'add' | 'remove', errorInDialog = false) {
     setError('');
@@ -1321,11 +1368,11 @@ function Discovery({ initial, imported, changed, exclusionsChanged, showExcluded
       const data = await request<{ exclusions: string[]; registeredInside?: number }>(action === 'add' ? '/exclusions' : '/exclusions/remove', { path });
       setExclusions(data.exclusions); setRegisteredInside(data.registeredInside || 0); exclusionsChanged(); void loadRoots();
       setSelected(new Set()); importId.current = crypto.randomUUID();
-      if (scan && scan.status !== 'running') {
+      if (showingAll || (scan && scan.status !== 'running')) {
         try {
           const params = new URLSearchParams({ limit: '30', offset: String(page * 30), filter, q: query });
-          const { scan: latest } = await request<{ scan: Scan }>(`/scans/${scan.id}?${params}`);
-          setScan(latest); changed(latest);
+          if (showingAll) setCombined(await request<CombinedCandidates>(`/candidates?${params}`));
+          else { const { scan: latest } = await request<{ scan: Scan }>(`/scans/${scan!.id}?${params}`); setScan(latest); changed(latest); }
         } catch (e) { setError(`除外設定は保存しましたが、候補を更新できませんでした。画面を再読み込みしてください（${(e as Error).message}）`); }
       }
       return null;
@@ -1340,7 +1387,7 @@ function Discovery({ initial, imported, changed, exclusionsChanged, showExcluded
   }
   async function add(check: boolean) {
     setError(''); setBusy(true); setAdding(check ? 'check' : 'register');
-    try { const result = await request<{ id: string; projectIds: string[] }>('/imports', { id: importId.current, scanId: scan?.id, candidateIds: [...selected] }); await imported(result.id, result.projectIds, check); }
+    try { const result = await request<{ id: string; projectIds: string[] }>('/imports', { id: importId.current, scanId: showingAll ? undefined : scan?.id, candidateIds: [...selected] }); await imported(result.id, result.projectIds, check); }
     catch (e) { setError((e as Error).message); } finally { setBusy(false); setAdding(null); }
   }
   const insideNotice = <p role="status" className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-caption text-warning"><CircleAlert size={14} className="shrink-0" />追加した除外の中に、登録済みのアプリが{registeredInside}件あります。<a href="#catalog" className="text-inherit underline" onClick={e => { e.preventDefault(); showExcluded(); }}>カタログで確認して外す</a></p>;
@@ -1356,13 +1403,14 @@ function Discovery({ initial, imported, changed, exclusionsChanged, showExcluded
         {roots && roots.length + exclusions.length > 0 && <Button variant="ghost" size="sm" className="text-dim max-md:order-last" aria-expanded={showSettings} aria-controls={settingsId}
           aria-label={showSettings ? '探索フォルダと除外の一覧を隠す' : '探索フォルダと除外の一覧を表示'} onClick={toggleSettings}>
           {showSettings ? <ChevronDown size={15} /> : <ChevronRight size={15} />}{showSettings ? '一覧を隠す' : '一覧を表示'}</Button>}
+        {!!roots?.length && <Button className="max-md:w-full" disabled={locked} title="登録したフォルダを順に探索し直し、すべての候補をまとめて表示します" onClick={() => void scanEverything()}><RefreshCw size={15} />すべて探索</Button>}
         <Button variant={capabilities.folderPicker ? 'outline' : 'default'} className="max-md:w-full" disabled={locked} onClick={() => setPathTarget('scan')}>探索フォルダをパスで追加</Button>
         {capabilities.folderPicker && <Button variant="default" className="max-md:w-full" disabled={locked} onClick={() => void pick()}><Plus size={16} />{picking ? 'Finderで選択中…' : busy ? '準備中…' : 'フォルダを追加'}</Button>}
       </div>
       {!capabilities.folderPicker && <p className="mt-3 text-caption text-muted-foreground">フォルダのパスを直接入力して追加します。フォルダ選択・外部アプリ起動は、このOSでは利用できません。</p>}
       {!showSettings && <>
         {scan && <div className="mt-4 flex items-center gap-3 rounded-md bg-background px-3 py-2 max-md:flex-wrap">
-          <div className="min-w-0 flex-1 max-md:basis-full"><span className="block text-caption text-muted-foreground">表示中の結果</span><code className={cn('block text-[13px] text-foreground', wrap)}>{scan.root}</code></div>
+          <div className="min-w-0 flex-1 max-md:basis-full"><span className="block text-caption text-muted-foreground">{detail ? '表示中の結果' : '直近の探索'}</span><code className={cn('block text-[13px] text-foreground', wrap)}>{scan.root}</code></div>
           <Button size="sm" disabled={locked || roots?.some(item => item.path === scan.root && item.excluded)} aria-label={`${scan.root}を再探索`} onClick={() => void start(scan.root)}><RefreshCw size={14} />再探索</Button>
         </div>}
         {registeredInside > 0 && insideNotice}
@@ -1374,9 +1422,9 @@ function Discovery({ initial, imported, changed, exclusionsChanged, showExcluded
           <div className="min-w-0 flex-1 max-md:basis-full">
             <code className={cn('block text-[13px] text-foreground', wrap)}>{item.path}</code>
             <span className={cn('mt-0.5 block text-caption tabular-nums', item.excluded ? 'text-warning' : 'text-muted-foreground')}>{item.excluded ? '除外設定に含まれるため探索できません' : item.lastScan
-              ? `${date(item.lastScan.endedAt || item.lastScan.startedAt)} · ${scanLabels[item.lastScan.status]} · 候補${item.lastScan.candidates}件（未登録${item.lastScan.newCandidates}件）${current ? ' · 表示中' : ''}` : '未探索'}</span>
+              ? `${date(item.lastScan.endedAt || item.lastScan.startedAt)} · ${scanLabels[item.lastScan.status]} · 候補${item.lastScan.candidates}件（未登録${item.lastScan.newCandidates}件）${current ? detail ? ' · 表示中' : ' · 直近の探索' : ''}` : '未探索'}</span>
           </div>
-          {item.lastScan && !current && <Button size="sm" variant="ghost" disabled={locked} onClick={() => void show(item.lastScan!.id)}>結果を見る</Button>}
+          {item.lastScan && item.lastScan.status !== 'completed' && !(current && detail) && <Button size="sm" variant="ghost" disabled={locked} title="この探索の問題・再開・再試行を確認します" onClick={() => void show(item.lastScan!.id)}>詳細</Button>}
           <Button size="sm" disabled={locked || item.excluded} aria-label={`${item.path}を再探索`} onClick={() => void start(item.path)}><RefreshCw size={14} />再探索</Button>
           <Button variant="ghost" size="icon" className="size-8 shrink-0 text-muted-foreground" aria-label={`${item.path}の登録を解除`} title="探索フォルダの登録を解除（登録済みのアプリは変わりません）" disabled={locked} onClick={() => void unregister(item.path)}><X size={15} /></Button>
         </li>;
@@ -1397,8 +1445,10 @@ function Discovery({ initial, imported, changed, exclusionsChanged, showExcluded
       </div>
     </section>
     {error && <Alert variant="destructive" className="mb-6"><CircleAlert size={18} /><AlertDescription>{error}</AlertDescription></Alert>}
-    {scan ? <>
-      <div className="mb-6 flex flex-wrap items-center gap-4 text-xs" aria-live="polite">
+    {sweep?.status === 'running' && <p aria-live="polite" className="mb-3 flex items-center gap-2 text-xs tabular-nums"><FolderSearch size={15} className="shrink-0 text-brand" />すべてのフォルダを探索中: {Math.min(sweep.done + 1, sweep.roots.length)} / {sweep.roots.length}フォルダ目。一時停止・キャンセルすると、残りのフォルダは探索しません。</p>}
+    {sweep && sweep.status !== 'running' && sweep.skipped.length > 0 && <p className="mb-3 text-caption text-warning">見つからないか除外されたため、{sweep.skipped.length}件のフォルダを探索しませんでした: {sweep.skipped.slice(0, 3).join('、')}{sweep.skipped.length > 3 ? ' ほか' : ''}</p>}
+    {scan || roots?.length ? <>
+      {scan && <div className="mb-6 flex flex-wrap items-center gap-4 text-xs" aria-live="polite">
         <span className={cn('size-[7px] rounded-full', scan.status === 'partial' || scan.status === 'paused' || scan.status === 'cancelled' ? 'bg-warning' : 'bg-brand')} />
         <strong>{scanLabels[scan.status]}</strong>
         <span className="tabular-nums">{scan.status === 'running' ? `${scan.visited.toLocaleString()}項目を確認` : scan.status === 'paused' && !scan.candidateCount ? `${scan.found ?? 0}件を検出（候補は再開後に整理）` : `${scan.candidateCount ?? scan.candidates.length}件の候補`}</span>
@@ -1411,9 +1461,16 @@ function Discovery({ initial, imported, changed, exclusionsChanged, showExcluded
           {scan.status === 'running' && <Button size="sm" variant="ghost" disabled={busy} onClick={() => void scanAction('cancel')}>キャンセル</Button>}
           {scan.status !== 'running' && <Button size="sm" variant="ghost" disabled={busy} onClick={() => setRemovingScan(true)}>探索記録を削除…</Button>}
         </div>
-      </div>
-      {scan.status === 'paused' && <div className="mb-6"><ScanProgress scan={scan} /></div>}
-      {scan.status === 'running' ? <ScanProgress scan={scan} /> : <section aria-label="見つかった候補">
+        <code className={cn('basis-full text-caption text-muted-foreground', wrap)}>{scan.root}</code>
+      </div>}
+      {scan?.status === 'paused' && <div className="mb-6"><ScanProgress scan={scan} /></div>}
+      {scan?.status === 'running' ? <ScanProgress scan={scan} /> : <section aria-label="見つかった候補">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          {showingAll ? <p className="text-xs"><strong>すべての探索フォルダの候補</strong><span className="ml-2 text-muted-foreground tabular-nums">{combined ? `${combined.candidateCount.toLocaleString()}件 · 探索済み ${combined.folders.scanned} / ${combined.folders.total}フォルダ` : ''}</span></p>
+            : <p className="text-xs"><strong>この探索の候補</strong><code className={cn('ml-2 text-caption text-muted-foreground', wrap)}>{scan!.root}</code></p>}
+          {!showingAll && <Button size="sm" variant="ghost" onClick={showAll}><ChevronLeft size={14} />すべての候補に戻る</Button>}
+        </div>
+        {showingAll && combined && combined.folders.scanned < combined.folders.total && <p className="mb-3 text-caption text-warning">まだ探索していないフォルダが{combined.folders.total - combined.folders.scanned}件あります。「すべて探索」で探索できます。</p>}
         <div className="mb-4 flex flex-wrap items-center justify-between gap-4 max-md:gap-2">
           <div role="group" className="flex gap-1" aria-label="候補の絞り込み">{[['new', '新規'], ['registered', '登録済み'], ['all', 'すべて']].map(([id, text]) =>
             <Button key={id} variant="ghost" size="sm" aria-pressed={filter === id} className="aria-pressed:border-border aria-pressed:bg-accent" onClick={() => { setFilter(id); setPage(0); }}>{text}</Button>)}</div>
@@ -1421,9 +1478,9 @@ function Discovery({ initial, imported, changed, exclusionsChanged, showExcluded
         </div>
         {selectable.length > 0 && <div className="flex min-h-12 items-center gap-3 border-t bg-raised px-4 max-md:px-1">
           <Checkbox id="select-visible" checked={selectedVisible === selectable.length ? true : selectedVisible ? 'indeterminate' : false} disabled={busy || pageLoading} onCheckedChange={checked => void selectAll(checked === true)} />
-          <Label htmlFor="select-visible" className="cursor-pointer text-xs">表示中の新規候補をすべて選択<span className="ml-1 font-normal text-muted-foreground tabular-nums">{scan?.persistent && filter === 'new' ? totalRows : selectable.length}件</span></Label>
+          <Label htmlFor="select-visible" className="cursor-pointer text-xs">表示中の新規候補をすべて選択<span className="ml-1 font-normal text-muted-foreground tabular-nums">{paged && filter === 'new' ? totalRows : selectable.length}件</span></Label>
           {query && <span className="text-caption text-muted-foreground max-md:hidden">「{query}」で絞り込み中</span>}
-          {scan.persistent && totalRows > 30 && <Button size="sm" variant="ghost" disabled={busy || pageLoading} onClick={() => choose(pageRows.filter(c => !c.registered).map(c => c.id), true)}>このページの新規候補を選択</Button>}
+          {paged && totalRows > 30 && <Button size="sm" variant="ghost" disabled={busy || pageLoading} onClick={() => choose(pageRows.filter(c => !c.registered).map(c => c.id), true)}>このページの新規候補を選択</Button>}
         </div>}
         {pageLoading && <p aria-live="polite" className="py-2 text-caption text-muted-foreground">候補を読み込んでいます…</p>}
         {pageRows.length ? <div className="border-t">{pageRows.map(candidate => <CandidateRow key={candidate.id} candidate={candidate} selected={selected.has(candidate.id)} toggle={() => choose([candidate.id], !selected.has(candidate.id))} exclude={() => void changeExclusions(candidate.path, 'add')} />)}</div>
@@ -1437,7 +1494,7 @@ function Discovery({ initial, imported, changed, exclusionsChanged, showExcluded
           </div>
         </div>
       </section>}
-      {(scan.issueCount ?? scan.issues.length) > 0 && <ScanIssues key={scan.id} scan={scan} />}
+      {scan && !showingAll && (scan.issueCount ?? scan.issues.length) > 0 && <ScanIssues key={scan.id} scan={scan} />}
     </> : <div className="mt-12 grid grid-cols-3 gap-8 max-md:mt-8 max-md:grid-cols-1 max-md:gap-4">
       {[['フォルダを指定', 'アプリをまとめて置いている親フォルダを指定します。'], ['候補を確認', '設定ファイルから技術構成を検出。登録するものを選べます。'], ['登録してチェック', '選んだ候補を登録し、脆弱性をチェックします。用途やタグの整理は任意です。']].map(([title, text], i) =>
         <div key={title} className="pr-4 max-md:relative max-md:pl-8">
@@ -1447,7 +1504,7 @@ function Discovery({ initial, imported, changed, exclusionsChanged, showExcluded
         </div>)}
     </div>}
     {pathTarget && <FolderPathDialog key={pathTarget} target={pathTarget} close={() => setPathTarget(null)} submit={pathTarget === 'scan' ? path => start(path, true) : path => changeExclusions(path, 'add', true)} />}
-    <ScanHistory refreshKey={`${scan?.id}:${scan?.status}`} show={show} />
+    <ScanHistory refreshKey={`${scan?.id}:${scan?.status}:${sweep?.done}`} show={show} />
     <Dialog open={removingScan} onOpenChange={setRemovingScan}>
       <DialogContent><DialogHeader><DialogTitle>探索記録を削除</DialogTitle><DialogDescription>この探索の途中経過・候補・問題の記録を削除します。登録済みアプリと元のファイルは残ります。</DialogDescription></DialogHeader>
         <DialogFooter><Button variant="ghost" disabled={busy} onClick={() => setRemovingScan(false)}>戻る</Button><Button variant="destructive" disabled={busy} onClick={() => void scanAction('remove')}>探索記録を削除</Button></DialogFooter>
@@ -1683,6 +1740,8 @@ function GitPanel({ project, reloadProjects, className, headingClassName }: { pr
 type SearchResult = { matches: { project: { id: string; name: string; path: string; lifecycle: Lifecycle }; readAt: string; status: DependencyStatus; dependencies: Dependency[] }[];
   coverage: { read: number; withLock: number; total: number; unsupported?: number } };
 
+type CombinedCandidates = { candidates: ScanCandidate[]; candidateCount: number; filteredCount: number; folders: { total: number; scanned: number } };
+type Sweep = { status: 'running' | 'completed' | 'stopped'; roots: string[]; done: number; scanId: string | null; skipped: string[]; startedAt: string; endedAt: string | null };
 type DependencyProgress = { running: boolean; done: number; total: number };
 type ScanRoot = { path: string; createdAt: string; excluded: boolean;
   lastScan: { id: string; status: Scan['status']; startedAt: string; endedAt: string | null; candidates: number; newCandidates: number } | null };
