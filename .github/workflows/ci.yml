@@ -62,4 +62,4 @@ jobs:
       - name: Check the prepared runtime
         run: npm.cmd run doctor
       - name: Windows paths and local API smoke tests
-        run: node --import tsx --test tests/windows.test.ts tests/catalog-tree.test.ts tests/cargo-locks.test.ts
+        run: node --import tsx --test tests/windows.test.ts tests/windows-folder-picker.test.ts tests/windows-apps.test.ts tests/windows-app-api.test.ts tests/catalog-tree.test.ts tests/cargo-locks.test.ts

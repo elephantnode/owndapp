@@ -1,3 +1,4 @@
+import { windowsEditors, windowsTerminals } from './windows-apps.js';
 import { ScanJobs } from './scan-jobs.js';
 import { inspectGuard, applyGuard } from './guard.js';
 import { basename, isAbsolute, sep } from 'node:path';
@@ -23,7 +24,7 @@ export type VulnerabilityJob = { id: string; status: 'running' | 'done' | 'faile
 export function createApi(store: Store, port = 4310, pickFolder: FolderPicker = chooseFolder, openFolder: FolderOpener = openInFinder,
   { pickApp = chooseApplication, openApp = openWithApp, osv = osvApi, osvOptions = {}, platform = process.platform }: { pickApp?: AppPicker; openApp?: AppOpener; osv?: OsvClient; osvOptions?: RunOptions; platform?: NodeJS.Platform } = {}) {
   const nativeDesktop = platform === 'darwin';
-  const capabilities = { platform, folderPicker: nativeDesktop, revealFolder: nativeDesktop, externalApps: nativeDesktop };
+  const capabilities = { platform, folderPicker: nativeDesktop || platform === 'win32', revealFolder: nativeDesktop, externalApps: nativeDesktop || platform === 'win32' };
   const requireDesktop = () => { if (!nativeDesktop) throw new CatalogError('このOSではフォルダ選択・外部アプリ起動は利用できません。フォルダはパスを直接入力してください', 501); };
   const app = new Hono();
   const token = randomBytes(32).toString('hex');
@@ -383,41 +384,43 @@ export function createApi(store: Store, port = 4310, pickFolder: FolderPicker = 
     store.setLifecycle(input.ids, input.lifecycle, input.archiveReason); return c.json({ projects: store.projects() });
   });
   app.post('/api/folder-picker', async c => {
-    requireDesktop();
-    if (picking) throw new CatalogError('Finderのフォルダ選択がすでに開いています', 409);
+    if (!capabilities.folderPicker) throw new CatalogError('このOSではフォルダ選択を利用できません。パスを直接入力してください', 501);
+    if (picking) throw new CatalogError('フォルダ選択画面がすでに開いています', 409);
     const input = await c.req.json<{ defaultPath?: string; purpose?: string }>();
     let defaultPath: string | undefined;
     if (typeof input.defaultPath === 'string' && input.defaultPath.length <= 4096) defaultPath = await canonicalRoot(input.defaultPath).catch(() => undefined);
     picking = true;
     try { return c.json({ path: await pickFolder(defaultPath, input.purpose === 'exclude' ? '探索から除外するフォルダを選択' : undefined) }); }
-    catch { throw new CatalogError('Finderのフォルダ選択を開けませんでした。このMacで起動しているか確認してください', 500); }
+    catch { throw new CatalogError('フォルダ選択画面を開けませんでした。owndappを起動した端末を確認するか、パスを直接入力してください', 500); }
     finally { picking = false; }
   });
   const role = (value: unknown): AppRole => {
     if (typeof value !== 'string' || !Object.hasOwn(appRoleLabels, value)) throw new CatalogError('エディタかターミナルを指定してください');
     return value as AppRole;
   };
-  // Only existing .app bundles are accepted, so open -a never receives an arbitrary file or command.
-  const application = async (path: string) => {
-    if (!isAbsolute(path) || !path.endsWith('.app')) return null;
+  // Validate a native application at selection and again before launch; never accept a command string.
+  const windowsSupported = (target: AppRole, path: string) => (target === 'editor' ? windowsEditors : windowsTerminals).includes(basename(path).toLowerCase());
+  const application = async (path: string, target: AppRole) => {
+    if (!isAbsolute(path) || (platform === 'win32' ? !windowsSupported(target, path) : !path.endsWith('.app'))) return null;
     const resolved = await realpath(path).catch(() => null);
-    if (!resolved?.endsWith('.app') || !await stat(resolved).then(info => info.isDirectory(), () => false)) return null;
-    return { name: basename(resolved, '.app'), path: resolved };
+    if (!resolved || !await stat(resolved).then(info => platform === 'win32' ? info.isFile() : info.isDirectory(), () => false)) return null;
+    if (platform === 'win32' ? !windowsSupported(target, resolved) : !resolved.endsWith('.app')) return null;
+    return { name: platform === 'win32' ? basename(resolved).replace(/\.exe$/i, '') : basename(resolved, '.app'), path: resolved };
   };
   app.get('/api/apps', c => c.json({ apps: store.apps() }));
   app.post('/api/apps/pick', async c => {
-    requireDesktop();
+    if (!capabilities.externalApps) requireDesktop();
     const input = await c.req.json<{ role: string }>();
     const target = role(input.role);
-    if (picking) throw new CatalogError('Finderの選択画面がすでに開いています', 409);
+    if (picking) throw new CatalogError('アプリの選択画面がすでに開いています', 409);
     picking = true;
     let chosen: string | null;
     try { chosen = await pickApp(`${appRoleLabels[target]}として使うアプリを選択`); }
-    catch { throw new CatalogError('アプリの選択画面を開けませんでした。このMacで起動しているか確認してください', 500); }
+    catch { throw new CatalogError('アプリの選択画面を開けませんでした。owndappを起動した端末を確認してください', 500); }
     finally { picking = false; }
     if (!chosen) return c.json({ apps: store.apps(), cancelled: true });
-    const found = await application(chosen);
-    if (!found) throw new CatalogError('アプリケーション（.app）を選んでください');
+    const found = await application(chosen, target);
+    if (!found) throw new CatalogError(platform === 'win32' ? '対応する実行ファイルを選んでください。エディタはCode.exe・Cursor.exeなど、ターミナルはpowershell.exe・pwsh.exe・cmd.exe・wt.exeに対応します' : 'アプリケーション（.app）を選んでください');
     store.setApp(target, found); return c.json({ apps: store.apps() });
   });
   app.post('/api/apps/clear', async c => {
@@ -425,17 +428,19 @@ export function createApi(store: Store, port = 4310, pickFolder: FolderPicker = 
     store.setApp(role(input.role), null); return c.json({ apps: store.apps() });
   });
   app.post('/api/projects/:id/open', async c => {
-    requireDesktop();
+    if (!capabilities.externalApps) requireDesktop();
     const input = await c.req.json<{ role: string }>();
     const target = role(input.role);
     const project = store.project(c.req.param('id'));
     const registered = store.apps()[target];
     if (!registered) throw new CatalogError(`${appRoleLabels[target]}が登録されていません。設定で選んでください`);
-    const found = await application(registered.path);
+    const found = await application(registered.path, target);
     if (!found) throw new CatalogError(`登録した${appRoleLabels[target]}（${registered.name}）が見つかりません。設定で選び直してください`, 404);
     const exists = await stat(project.path).then(info => info.isDirectory(), () => false);
     if (!exists) throw new CatalogError('フォルダが見つかりません。移動・削除されていないか確認してください', 404);
-    try { await openApp(found.path, project.path); } catch { throw new CatalogError(`${found.name}で開けませんでした。このMacで起動しているか確認してください`, 500); }
+    if (platform === 'win32' && target === 'terminal' && basename(found.path).toLowerCase() === 'wt.exe' && project.path.includes(';')) throw new CatalogError('このフォルダはWindows Terminalで開けません。PowerShellを直接登録して開いてください');
+    if (platform === 'win32' && target === 'terminal' && basename(found.path).toLowerCase() === 'cmd.exe' && project.path.startsWith('\\\\')) throw new CatalogError('共有フォルダはcmdでは開けません。PowerShellを登録して開いてください');
+    try { await openApp(found.path, project.path, target); } catch { throw new CatalogError(`${found.name}で開けませんでした。owndappを起動した端末を確認してください`, 500); }
     return c.json({ ok: true });
   });
   app.post('/api/projects/:id/reveal', async c => {
@@ -443,7 +448,7 @@ export function createApi(store: Store, port = 4310, pickFolder: FolderPicker = 
     const project = store.project(c.req.param('id'));
     const exists = await stat(project.path).then(info => info.isDirectory(), () => false);
     if (!exists) throw new CatalogError('フォルダが見つかりません。移動・削除されていないか確認してください', 404);
-    try { await openFolder(project.path); } catch { throw new CatalogError('Finderで表示できませんでした。このMacで起動しているか確認してください', 500); }
+    try { await openFolder(project.path); } catch { throw new CatalogError('Finderで表示できませんでした。owndappを起動した端末を確認してください', 500); }
     return c.json({ ok: true });
   });
   app.get('/api/projects/:id/guard', async c => {

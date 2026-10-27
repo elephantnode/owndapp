@@ -41,3 +41,7 @@
 - [Windowsの能力情報を模擬した詳細画面](windows-path-only.png)：macOS専用のFinder・外部アプリ起動を表示しない。390px、生成fixture。Windows実機で撮影した画像ではない。
 
 2026-10-26公開準備: 公開用コピーでは現在の隔離ブラウザテストで生成した画像に更新し、過去のローカル配置を含む画像は除外した。Windowsの表示は能力情報を模擬したもので、Windows実機の撮影ではない。
+
+- [Windowsのパス登録画面のフォルダ選択](windows-folder-picker.png)：2026-10-27。選択応答を模擬した390pxのブラウザ表示。Windows標準ダイアログそのものの画像ではありません。
+
+2026-10-27: home-first-run / home-first-run-narrowを初回の任意登録欄付きに更新。first-run-tools-darwin / first-run-tools-win32は登録・解除後の390px画面。生成データと模擬アプリ応答による確認で、Windows標準ダイアログや実アプリ起動の画像ではありません。

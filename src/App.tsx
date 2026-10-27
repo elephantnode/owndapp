@@ -1,3 +1,4 @@
+import { OpenAppSettings } from './OpenAppSettings';
 import { PlatformContext, unavailablePlatform, usePlatform } from './PlatformContext';
 import { DependencyCoverage } from './DependencyCoverage';
 import { ProjectResponsePanel } from './ProjectResponsePanel';
@@ -928,7 +929,7 @@ export function App() {
       {!ready ? <Empty><Layers size={34} /><h1 className={emptyTitle}>カタログに接続しています</h1><p className={emptyText}>ローカルの保存データを読み込みます。</p></Empty> : detail ? current ?
         <ProjectDetail key={current.id} project={current} checkVulnerabilities={() => setChecking({ ids: [current.id] })} reloadProjects={() => reload().then(() => {})} apps={registeredApps} open={role => open(current, role)} openSettings={() => navigate('settings')} reveal={() => reveal(current)} remove={reason => setRemoving({ projects: [current], reason })} exclude={() => setExcluding([current.path])} onDirty={value => { unsaved.current = value; }} back={() => { unsaved.current = false; setDetail(null); location.hash = view; }} saved={async () => { await reload(); showToast('アプリを保存しました'); }} /> :
         <Empty><h1 className={emptyTitle}>アプリが見つかりません</h1><Button onClick={() => navigate('catalog')}>カタログに戻る</Button></Empty> :
-        view === 'home' ? <HomeView projects={projects} initialScan={initialScan} toDiscover={() => navigate('discover')} toCatalog={() => { if (navigate('catalog')) clearFilters(); }} toAttention={() => navigate('attention')} toSettings={() => navigate('settings')} check={(ids, label) => setChecking({ ids, label })} /> :
+        view === 'home' ? <HomeView apps={apps} appsChanged={setApps} projects={projects} initialScan={initialScan} toDiscover={() => navigate('discover')} toCatalog={() => { if (navigate('catalog')) clearFilters(); }} toAttention={() => navigate('attention')} toSettings={() => navigate('settings')} check={(ids, label) => setChecking({ ids, label })} /> :
         view === 'attention' ? <AttentionView projects={projects} issues={issues} layout={layout} chooseLayout={chooseLayout} apps={registeredApps} open={open} reveal={reveal}
           reloadProjects={reload} notify={setNotice} openSettings={() => navigate('settings')} toDiscover={() => navigate('discover')}
           check={(ids, label) => setChecking({ ids, label })} remove={(list, reason) => setRemoving({ projects: list, reason })}
@@ -1405,7 +1406,7 @@ function Discovery({ initial, imported, changed, exclusionsChanged, showExcluded
           {showSettings ? <ChevronDown size={15} /> : <ChevronRight size={15} />}{showSettings ? '一覧を隠す' : '一覧を表示'}</Button>}
         {!!roots?.length && <Button className="max-md:w-full" disabled={locked} title="登録したフォルダを順に探索し直し、すべての候補をまとめて表示します" onClick={() => void scanEverything()}><RefreshCw size={15} />すべて探索</Button>}
         <Button variant={capabilities.folderPicker ? 'outline' : 'default'} className="max-md:w-full" disabled={locked} onClick={() => setPathTarget('scan')}>探索フォルダをパスで追加</Button>
-        {capabilities.folderPicker && <Button variant="default" className="max-md:w-full" disabled={locked} onClick={() => void pick()}><Plus size={16} />{picking ? 'Finderで選択中…' : busy ? '準備中…' : 'フォルダを追加'}</Button>}
+        {capabilities.folderPicker && <Button variant="default" className="max-md:w-full" disabled={locked} onClick={() => void pick()}><Plus size={16} />{picking ? 'フォルダを選択中…' : busy ? '準備中…' : 'フォルダを追加'}</Button>}
       </div>
       {!capabilities.folderPicker && <p className="mt-3 text-caption text-muted-foreground">フォルダのパスを直接入力して追加します。フォルダ選択・外部アプリ起動は、このOSでは利用できません。</p>}
       {!showSettings && <>
@@ -1514,38 +1515,11 @@ function Discovery({ initial, imported, changed, exclusionsChanged, showExcluded
 }
 
 function SettingsView({ apps, changed, toDiscover }: { apps: OpenApps; changed: (apps: OpenApps) => void; toDiscover: () => void }) {
-  const capabilities = usePlatform();
-  const [error, setError] = useState(''); const [busy, setBusy] = useState<AppRole | null>(null);
-  async function change(role: AppRole, action: 'pick' | 'clear') {
-    setError(''); setBusy(role);
-    try { const data = await request<{ apps: OpenApps }>(`/apps/${action}`, { role }); changed(data.apps); }
-    catch (e) { setError((e as Error).message); } finally { setBusy(null); }
-  }
   return <>
     <PageHeader context="この端末での使い方" title="設定・使い方" subtitle="使い方を確認し、探索フォルダや作業用のアプリを設定します。" />
     <UsageGuide />
     <section className="mb-8 border-y py-5"><h2 className="mb-2 text-sm font-semibold">探索・除外フォルダ</h2><p className="mb-3 text-caption text-muted-foreground">探す範囲と、今後は探さないフォルダを管理します。登録済みアプリの整理とは別の設定です。</p><Button onClick={toDiscover} variant="outline" size="sm">探索・除外フォルダを管理</Button></section>
-    {error && <Alert variant="destructive" className="mb-6"><CircleAlert size={18} /><AlertDescription>{error}</AlertDescription></Alert>}
-    {capabilities.externalApps ? <section aria-labelledby="open-apps" className="max-w-[720px]">
-      <h2 id="open-apps" className="mb-1 text-base font-semibold">作業用のエディタ・ターミナル</h2>
-      <p className="mb-4 text-xs text-muted-foreground">一覧と詳細の「○○で開く」で、アプリのフォルダをこのアプリで開きます。</p>
-      <div className="border-t">{(Object.keys(appRoleLabels) as AppRole[]).map(role => {
-        const app = apps[role]; const Icon = appIcons[role];
-        return <div key={role} role="group" aria-label={appRoleLabels[role]} className="flex items-center gap-4 border-b py-5 max-md:flex-wrap max-md:gap-3">
-          <Icon size={20} className="shrink-0 text-muted-foreground" />
-          <div className="min-w-0 flex-1">
-            <p className="text-xs font-medium">{appRoleLabels[role]}</p>
-            {app ? <><p className="mt-1 text-sm font-semibold">{app.name}</p><code className={cn('mt-0.5 block text-caption text-muted-foreground', wrap)}>{app.path}</code></>
-              : <p className="mt-1 text-[13px] text-muted-foreground">未登録</p>}
-          </div>
-          <div className="flex shrink-0 gap-2 max-md:w-full">
-            {app && <Button size="sm" variant="ghost" className="text-dim" disabled={!!busy} onClick={() => void change(role, 'clear')}>登録を解除</Button>}
-            <Button size="sm" variant={app ? 'outline' : 'default'} disabled={!!busy} onClick={() => void change(role, 'pick')}>{busy === role ? 'Finderで選択中…' : app ? '選び直す' : 'アプリを選ぶ'}</Button>
-          </div>
-        </div>;
-      })}</div>
-      <p className="mt-4 text-caption text-muted-foreground">macOSのアプリ選択画面から選びます。開くときはFinderでフォルダをアプリのアイコンに重ねたときと同じ動きで、アプリのファイルは変更しません。</p>
-    </section> : <p className="text-caption text-muted-foreground">このOSではエディタ・ターミナルの登録と起動は利用できません。必要なアプリから、プロジェクトのパスを指定して開いてください。</p>}
+    <OpenAppSettings apps={apps} changed={changed} />
   </>;
 }
 

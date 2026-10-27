@@ -1,8 +1,9 @@
+import { OpenAppSettings } from './OpenAppSettings';
 import { useEffect, useState, type ReactNode } from 'react';
 import { ArrowRight, CircleAlert, FolderSearch, LayoutList, RefreshCw, ShieldAlert, ShieldQuestion } from 'lucide-react';
 import { request } from './api';
 import { severityRank } from '../shared/priority';
-import type { Priority, Project, ResponseStatus, Scan, Severity } from '../shared/types';
+import type { OpenApps, Priority, Project, ResponseStatus, Scan, Severity } from '../shared/types';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -34,8 +35,8 @@ const steps: { title: string; text: string }[] = [
 ];
 
 // ホーム: where to start, and what to do next. The work itself stays on the existing screens; this only counts and points to them.
-export function HomeView({ projects, initialScan, toDiscover, toCatalog, toAttention, toSettings, check }: {
-  projects: Project[]; initialScan?: Scan; toDiscover: () => void; toCatalog: () => void; toAttention: () => void; toSettings: () => void;
+export function HomeView({ apps, appsChanged, projects, initialScan, toDiscover, toCatalog, toAttention, toSettings, check }: {
+  apps: OpenApps; appsChanged: (apps: OpenApps) => void; projects: Project[]; initialScan?: Scan; toDiscover: () => void; toCatalog: () => void; toAttention: () => void; toSettings: () => void;
   check: (ids: string[], label?: string) => void }) {
   const registered = projects.length > 0;
   const [work, setWork] = useState<Work[] | null>(null);
@@ -64,6 +65,7 @@ export function HomeView({ projects, initialScan, toDiscover, toCatalog, toAtten
       <Button variant="link" size="sm" className="px-0" onClick={toSettings}>使い方を詳しく見る</Button>
     </div>
     <p className="mt-4 max-w-[640px] text-caption text-muted-foreground">用途やタグの入力は任意です。入れなくても登録・チェック・対応まで進められます。ソースの移動・削除や自動更新はしません。</p>
+    <div className="my-6"><OpenAppSettings apps={apps} changed={appsChanged} initialSetup /></div>
     <ol className="m-0 mb-6 max-w-[640px] list-none border-t p-0">
       {steps.map((step, i) => <li key={step.title} className="grid grid-cols-[1.75rem_minmax(0,1fr)] gap-x-2 border-b py-3">
         <span aria-hidden className="text-sm font-semibold text-muted-foreground tabular-nums">{i + 1}</span>

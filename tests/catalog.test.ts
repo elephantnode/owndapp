@@ -405,13 +405,13 @@ test('Finderのフォルダ選択は、キャンセルを未選択として返�
   });
 });
 
-test('Finderを開けない環境では、探索を始めずにエラーを返す', async () => {
+test('フォルダ選択を開けない環境では、探索を始めずに直接入力を案内する', async () => {
   const store = new Store(':memory:');
   try {
     const { call } = client(store, async () => { throw new Error('unsupported'); });
     await call('/session');
     const result = await call('/folder-picker', {});
-    assert.equal(result.response.status, 500); assert.match(result.data.error, /Finder/);
+    assert.equal(result.response.status, 500); assert.match(result.data.error, /パスを直接入力/);
     assert.equal((await call('/folder-picker', {})).response.status, 500);
   } finally { store.close(); }
 });
