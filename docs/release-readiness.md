@@ -1,6 +1,6 @@
 # GitHub公開の準備
 
-2026-10-26。公開先: https://github.com/elephantnode/owndapp
+2026-10-27。公開先: https://github.com/elephantnode/owndapp
 
 ## 準備したもの
 
@@ -8,6 +8,7 @@
 - SECURITY.md（GitHubの非公開報告を使用する方針、現時点では未有効と明記）
 - CONTRIBUTING.md、バグ/要望フォーム、Pull Requestテンプレート
 - macOSの単体/API・ビルド・Chrome操作と、Windows experimentalの限定テストを行うCI
+- Windowsのフォルダ選択・対応.exe起動（実機未検証）と初回の任意アプリ登録
 - 第三者の著作権表示と、ビルドに含める依存ライセンス一覧
 - GitHubからの取得手順と、v0.1.0のリリース説明の下書き
 
@@ -26,7 +27,7 @@
 - [ ] GitHubから新規取得する手順を確認する
 - [ ] 初回リリースの説明とタグを確認して公開する
 
-公開用コピーの準備と、GitHubへのpush・設定変更・Release作成は別工程。CI設定ファイルがあるだけでは、GitHub上の実行成功やWindows実機の動作確認済みとはしない。
+公開用コピーの準備と、GitHubへのpush・設定変更・Release作成は別工程。CI設定ファイルがあるだけでは、GitHub上の実行成功やWindows実機の動作確認済みとはしない。Windowsは試験的対応のまま公開し、実機受け入れは公開後の課題とする。
 
 ## 確認した範囲
 
