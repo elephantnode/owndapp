@@ -1,6 +1,6 @@
-# v0.1.0 — リリース説明の下書き
+# v0.1.0
 
-GitHub Releaseやタグはまだ作成していません。
+公開済み: https://github.com/elephantnode/owndapp/releases/tag/v0.1.0
 
 owndappは、ローカルの開発プロジェクトを見つけて登録し、依存パッケージの脆弱性への対応を記録するツールです。Node.js 24.14以降を導入済みの開発者向けに、ターミナルから起動してブラウザで使います。
 
