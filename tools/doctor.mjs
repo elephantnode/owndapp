@@ -10,11 +10,11 @@ export function supportedNode(version) {
   for (let i = 0; i < 3; i++) if (parts[i] !== minimumNode[i]) return parts[i] > minimumNode[i];
   return true;
 }
-// Windows starts without the folder dialog and app launching, which rely on macOS commands.
+// Native capabilities differ by OS.
 export const supportedPlatforms = ['darwin', 'win32'];
 export function platformMessage(platform) {
   if (platform === 'darwin') return 'macOS：フォルダ選択・外部アプリ起動に対応';
-  if (platform === 'win32') return 'Windows：フォルダはパスを直接入力してください。フォルダ選択ダイアログ・外部アプリ起動は未対応です';
+  if (platform === 'win32') return 'Windows：フォルダ選択・パス入力・対応する外部アプリ起動に対応';
   return `このOS（${platform}）はサポート対象外です。対応しているのはmacOSとWindowsです`;
 }
 const exists = async path => stat(path).then(info => info.isFile(), () => false);

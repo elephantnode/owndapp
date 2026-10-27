@@ -50,7 +50,7 @@ test('開発起動はdist不要、通常起動は必要。データ保存先の�
   assert.ok((await inspectRuntime(options)).some(c => !c.ok && c.message.includes('フォルダではありません')));
 }));
 
-test('macOSとWindowsは起動可、Windowsは未対応の操作を案内。それ以外のOSは未サポートを明示', async () => fixture(async (root, put) => {
+test('macOSとWindowsは起動可、Windowsは対応する操作を案内。それ以外のOSは未サポートを明示', async () => fixture(async (root, put) => {
   await put('package.json', JSON.stringify({ dependencies: { hono: '1' }, devDependencies: { tsx: '1' } }));
   await put('node_modules/hono/package.json', '{}'); await put('node_modules/tsx/package.json', '{}');
   await put('node_modules/tsx/dist/cli.mjs', '');
@@ -62,8 +62,8 @@ test('macOSとWindowsは起動可、Windowsは未対応の操作を案内。そ�
   const windows = await run('win32');
   assert.equal(windows.every(c => c.ok), true);
   const note = windows.find(c => c.message.startsWith('Windows')).message;
-  assert.match(note, /パスを直接入力/);
-  assert.match(note, /フォルダ選択ダイアログ・外部アプリ起動は未対応/);
+  assert.match(note, /パス入力/);
+  assert.match(note, /フォルダ選択・パス入力・対応する外部アプリ起動に対応/);
   for (const platform of ['linux', 'freebsd', 'aix']) {
     const failures = (await run(platform)).filter(c => !c.ok);
     assert.equal(failures.length, 1);

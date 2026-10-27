@@ -6,7 +6,7 @@ owndappは、この端末の中で起動してブラウザで使うローカル�
 
 ## 必要なもの
 
-- macOS、またはWindows（パス直接入力。フォルダ選択・外部アプリ起動は未対応、実機未検証）
+- macOS、またはWindows（フォルダ選択・パス直接入力。標準ダイアログは実機未検証、対応するエディタ・ターミナルの登録と起動を実装、実機未検証）
 - Node.js 24.14以降（`package.json` の `engines` は `>=24.14.0`）と、同梱のnpm
 - [GitHubリポジトリ](https://github.com/elephantnode/owndapp)からclone、またはDownload ZIPで取得したowndappのフォルダ
 

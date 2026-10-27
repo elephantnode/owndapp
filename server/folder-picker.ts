@@ -1,3 +1,6 @@
+import { chooseWindowsApplication, openWindowsApp } from './windows-apps.js';
+import type { AppRole } from '../shared/types.js';
+import { chooseWindowsFolder } from './windows-folder-picker.js';
 import { execFile } from 'node:child_process';
 
 export type FolderPicker = (defaultPath?: string, prompt?: string) => Promise<string | null>;
@@ -17,6 +20,7 @@ const script = [
 
 // Opens the macOS folder dialog on this Mac. Resolves null when the user cancels.
 export const chooseFolder: FolderPicker = (defaultPath, prompt = '探索するフォルダを選択') => new Promise((resolve, reject) => {
+  if (process.platform === 'win32') { chooseWindowsFolder(defaultPath, prompt).then(resolve, reject); return; }
   if (process.platform !== 'darwin') { reject(new Error('unsupported')); return; }
   const args = [...script.flatMap(line => ['-e', line]), prompt];
   if (defaultPath) args.push(defaultPath);
@@ -37,7 +41,7 @@ export const openInFinder: FolderOpener = path => new Promise((resolve, reject) 
 });
 
 export type AppPicker = (prompt: string) => Promise<string | null>;
-export type AppOpener = (app: string, path: string) => Promise<void>;
+export type AppOpener = (app: string, path: string, role?: AppRole) => Promise<void>;
 
 const appScript = [
   'on run argv',
@@ -49,6 +53,7 @@ const appScript = [
 
 // Opens the macOS application chooser. Resolves the .app bundle path, or null when the user cancels.
 export const chooseApplication: AppPicker = prompt => new Promise((resolve, reject) => {
+  if (process.platform === 'win32') { chooseWindowsApplication(prompt).then(resolve, reject); return; }
   if (process.platform !== 'darwin') { reject(new Error('unsupported')); return; }
   execFile('/usr/bin/osascript', [...appScript.flatMap(line => ['-e', line]), prompt], { timeout: 10 * 60_000 }, (error, stdout, stderr) => {
     if (error) { if (/-128/.test(stderr)) resolve(null); else reject(error); return; }
@@ -59,7 +64,8 @@ export const chooseApplication: AppPicker = prompt => new Promise((resolve, reje
 
 // Opens the folder with the given application, as dropping the folder on the app's icon would.
 // Callers pass only registered .app bundles and paths of registered projects.
-export const openWithApp: AppOpener = (app, path) => new Promise((resolve, reject) => {
+export const openWithApp: AppOpener = (app, path, role = 'editor') => new Promise((resolve, reject) => {
+  if (process.platform === 'win32') { openWindowsApp(app, path, role).then(resolve, reject); return; }
   if (process.platform !== 'darwin') { reject(new Error('unsupported')); return; }
   execFile('/usr/bin/open', ['-a', app, '--', path], { timeout: 30_000 }, error => error ? reject(error) : resolve());
 });

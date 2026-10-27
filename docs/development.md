@@ -50,7 +50,7 @@ React・TypeScript・Vite。部品は [shadcn/ui](https://ui.shadcn.com) の形�
 
 ## OSによる機能の切り替え
 
-`/api/session`の`capabilities`はサーバーOSに基づく。macOSはフォルダ選択・Finder表示・登録アプリ起動、Windowsはパス入力を提供する。ブラウザOSでは判定しない。未対応のネイティブAPIは501で拒否し、画面からも隠す。機能情報を取得できない場合もネイティブ操作を表示しない。
+`/api/session`の`capabilities`はサーバーOSに基づく。macOSはフォルダ選択・Finder表示・登録アプリ起動、Windowsはフォルダ選択・パス入力・対応する登録アプリの起動を提供する。ブラウザOSでは判定しない。未対応のネイティブAPIは501で拒否し、画面からも隠す。機能情報を取得できない場合もネイティブ操作を表示しない。
 
 Windowsのドライブ・UNC・引用符付きパス・ホーム展開を扱い、ドライブ相対/ルート相対/デバイス名前空間は直接入力として拒否する。探索範囲はサーバー側のpath.relativeで判断。画面のフォルダツリーはOS形式別に区切りと大小文字を扱い、別ドライブ・共有を区別する。Windowsの区切り規則と利用可能なファイルフラグは[Node.js path](https://nodejs.org/api/path.html)と[fs constants](https://nodejs.org/api/fs.html#file-open-constants)を参照。
 
@@ -71,3 +71,18 @@ Radix UIとLucideのMODULE_LEVEL_DIRECTIVE（use client）は、RSCを使わな�
 `.github/workflows/ci.yml`はcontents:read、checkoutの認証情報保存なし、公式ActionのコミットSHA固定で用意する。macOSではlockのaudit→スクリプトを無効にしたci→署名検証→単体/API→ビルド→Chromeのブラウザ操作を実行する。Windows experimentalはbuild/doctorとWindows向けの限定したfixtureテストで、全テストや手動の実機受け入れを代替しない。GitHub上で実行するまではCI成功と扱わない。
 
 npm公開は行わないためpackage.jsonのprivate:trueを維持する。MITはownコードへ適用し、バンドルした依存の表示はbuildで生成するdist/third-party-licenses.mdを同梱する。公開準備・残る判断は[公開準備](release-readiness.md)を参照。
+
+
+## Windowsのフォルダ選択（2026-10-27）
+
+Windows PowerShell5.1の固定スクリプトをUTF16LEのEncodedCommandとして、シェルなしのexecFileで実行する。NoProfile/STA、タイムアウト/出力上限、UTF8の厳密なJSON応答を使用。入力パスとプロンプトは専用の子プロセス環境変数へ渡し、コードへ補間しない。Windows FormsのFolderBrowserDialogを使い、新規フォルダ作成を無効にし、キャンセルはnullとして扱う。実行ポリシーやシステム設定は変更しない。
+
+Microsoftの[FolderBrowserDialog](https://learn.microsoft.com/en-us/dotnet/api/system.windows.forms.folderbrowserdialog?view=netframework-4.8.1)と[PowerShell引数](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_powershell_exe?view=powershell-5.1)に基づく。標準ダイアログの実表示と操作はWindows実機での確認が残る。テストはexecの代替と、ブラウザの模擬応答を用いる。
+
+## 初回の作業用アプリ登録（2026-10-27）
+
+初回ホームと設定はOpenAppSettingsと同じapps状態・保存APIを共有する。未登録でも探索へ進める。登録でアプリは起動しない。選択キャンセルは保存を変更せず、失敗後は再試行できる。
+
+Windowsのアプリ選択は固定PowerShellスクリプトとOpenFileDialogで.exeを選ぶ。選択時・起動時に実在する通常ファイルと対応する名前を再確認し、登録済みパスとカタログ内のフォルダだけをspawnへ渡す。シェルは使わず、エディタへはフォルダを1引数、ターミナルへはcwdと固定引数を渡す。プロジェクト内の実行ファイルは起動しない。NODE_OPTIONS/ELECTRON_RUN_AS_NODEを起動先へ引き継がない。
+
+[Windows Terminalの引数](https://learn.microsoft.com/en-us/windows/terminal/command-line-arguments)のセミコロン区切りに合わせ、wt.exeで`;`を含むパスは拒否する。明示的なPowerShellコマンドで既定のコマンドを置き換える。[Nodeのdetachedとunref](https://nodejs.org/api/child_process.html#optionsdetached)を使用し、成功応答はspawnの成立を表す。ウィンドウの表示完了を保証するものではない。実Windows GUIは未検証。

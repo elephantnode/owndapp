@@ -38,12 +38,11 @@ test('機能情報はサーバーOSに基づき、未対応のネイティブ操
       const headers = { host: '127.0.0.1:4310', 'x-owndapp-client': 'web', 'content-type': 'application/json', 'x-owndapp-token': '' };
       const call = (path: string, body?: unknown) => api.request(`http://127.0.0.1:4310/api${path}`, { headers, method: body === undefined ? 'GET' : 'POST', body: body === undefined ? undefined : JSON.stringify(body) });
       const session = await (await call('/session')).json(); headers['x-owndapp-token'] = session.token;
-      assert.deepEqual(session.capabilities, { platform, folderPicker: platform === 'darwin', revealFolder: platform === 'darwin', externalApps: platform === 'darwin' });
+      assert.deepEqual(session.capabilities, { platform, folderPicker: true, revealFolder: platform === 'darwin', externalApps: true });
       if (platform === 'win32') {
-        for (const [path, body] of [['/folder-picker', {}], ['/apps/pick', { role: 'editor' }], ['/projects/unregistered/open', { role: 'editor' }], ['/projects/unregistered/reveal', {}]] as const) {
-          const response = await call(path, body); assert.equal(response.status, 501); assert.match((await response.json()).error, /パスを直接入力/);
-        }
-        assert.equal(calls, 0);
+        const response = await call('/projects/unregistered/reveal', {}); assert.equal(response.status, 501); assert.equal(calls, 0);
+        assert.equal((await call('/apps/pick', { role: 'editor' })).status, 200); assert.equal(calls, 1);
+        assert.equal((await call('/folder-picker', {})).status, 200); assert.equal(calls, 2);
       } else { assert.equal((await call('/folder-picker', {})).status, 200); assert.equal(calls, 1); }
     } finally { await api.shutdownScans(); store.close(); }
   }

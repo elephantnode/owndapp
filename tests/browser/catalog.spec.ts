@@ -1050,7 +1050,7 @@ test('生成したCargo.lockの変更を選択読取で実際に取り込み、�
   expect((await response.json()).matches[0].dependencies[0].version).toBe('3.3.5');
 });
 
-test('Windowsの機能情報ではパス入力を案内し、macOS専用操作を表示しない', async ({ page }) => {
+test('フォルダ選択が利用できない環境はパス入力を案内し、macOS専用操作を表示しない', async ({ page }) => {
   const native: string[] = [];
   page.on('request', req => { if (/\/api\/(folder-picker|apps\/pick|projects\/[^/]+\/(open|reveal))$/.test(req.url())) native.push(req.url()); });
   await page.route('**/api/session', async route => {
@@ -1088,4 +1088,93 @@ test('Windowsの機能情報ではパス入力を案内し、macOS専用操作�
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
   await page.screenshot({ path: 'docs/screenshots/windows-path-only.png', fullPage: true, animations: 'disabled' });
+});
+
+test('Windowsのパス登録画面でフォルダ選択・キャンセル・失敗後の直接入力ができる', async ({ page }) => {
+  await page.route('**/api/session', async route => {
+    const response = await route.fetch(); const data = await response.json();
+    return route.fulfill({ json: { ...data, capabilities: { platform: 'win32', folderPicker: true, revealFolder: false, externalApps: false } } });
+  });
+  let mode: 'select' | 'cancel' | 'error' = 'select';
+  const calls: any[] = []; let registrations = 0;
+  const chosen = String.raw`C:\Users\名前\日本語 Folder`;
+  await page.route('**/api/folder-picker', async route => {
+    calls.push(route.request().postDataJSON());
+    return mode === 'error' ? route.fulfill({ status: 500, json: { error: 'テスト用の選択失敗' } }) : route.fulfill({ json: { path: mode === 'cancel' ? null : chosen } });
+  });
+  page.on('request', req => { if (req.method() === 'POST' && req.url().endsWith('/api/scans')) registrations++; });
+  await page.goto('/#discover');
+  await expect(page.getByRole('button', { name: 'フォルダを追加', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '探索フォルダをパスで追加', exact: true }).click();
+  const dialog = page.getByRole('dialog'); const input = dialog.getByRole('textbox', { name: 'フォルダのパス' });
+  await input.fill(String.raw`C:\Users\名前`);
+  await dialog.getByRole('button', { name: 'フォルダを選択', exact: true }).click();
+  await expect(input).toHaveValue(chosen);
+  expect(calls[0]).toEqual({ defaultPath: String.raw`C:\Users\名前`, purpose: 'scan' });
+  mode = 'cancel';
+  await dialog.getByRole('button', { name: 'フォルダを選択', exact: true }).click();
+  await expect(input).toHaveValue(chosen);
+  await expect(dialog.getByRole('button', { name: 'フォルダを選択', exact: true })).toBeEnabled();
+  mode = 'error';
+  await dialog.getByRole('button', { name: 'フォルダを選択', exact: true }).click();
+  await expect(dialog.getByRole('alert')).toContainText('パスを直接入力');
+  await expect(input).toHaveValue(chosen); await expect(input).toBeEnabled();
+  await expect(dialog.getByRole('button', { name: '追加して探索', exact: true })).toBeEnabled();
+  expect(registrations).toBe(0);
+  await dialog.getByRole('button', { name: 'キャンセル', exact: true }).click();
+  const expand = page.getByRole('button', { name: '探索フォルダと除外の一覧を表示' });
+  if (await expand.count()) await expand.click();
+  await page.getByRole('button', { name: '除外フォルダをパスで追加', exact: true }).click();
+  mode = 'select';
+  await dialog.getByRole('button', { name: 'フォルダを選択', exact: true }).click();
+  await expect(input).toHaveValue(chosen); expect(calls.at(-1).purpose).toBe('exclude');
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+  await page.screenshot({ path: 'docs/screenshots/windows-folder-picker.png', animations: 'disabled' });
+  await dialog.getByRole('button', { name: 'キャンセル', exact: true }).click();
+});
+
+for (const platform of ['darwin', 'win32']) test(`${platform}: 初回ホームで任意の作業用アプリを登録し設定と共有する`, async ({ page }) => {
+  let apps: Record<string, { name: string; path: string } | null> = { editor: null, terminal: null };
+  let mode: 'select' | 'cancel' | 'error' = 'select'; let launches = 0;
+  page.on('request', req => { if (/\/projects\/[^/]+\/open$/.test(req.url())) launches++; });
+  await page.route('**/api/session', async route => {
+    const response = await route.fetch(); const data = await response.json();
+    return route.fulfill({ json: { ...data, capabilities: { platform, folderPicker: true, externalApps: true, revealFolder: platform === 'darwin' } } });
+  });
+  await page.route('**/api/projects', route => route.fulfill({ json: { projects: [] } }));
+  await page.route('**/api/apps', route => route.fulfill({ json: { apps } }));
+  await page.route('**/api/apps/pick', route => {
+    if (mode === 'error') return route.fulfill({ status: 500, json: { error: 'テスト用の選択失敗' } });
+    if (mode === 'cancel') return route.fulfill({ json: { apps, cancelled: true } });
+    const role = route.request().postDataJSON().role;
+    apps[role] = platform === 'win32' ? { name: role === 'editor' ? 'Code' : 'pwsh', path: role === 'editor' ? 'C:\\Apps\\Code.exe' : 'C:\\Apps\\pwsh.exe' } : { name: role === 'editor' ? 'TestEditor' : 'TestTerminal', path: `/Applications/Test${role}.app` };
+    return route.fulfill({ json: { apps } });
+  });
+  await page.route('**/api/apps/clear', route => { apps[route.request().postDataJSON().role] = null; return route.fulfill({ json: { apps } }); });
+  await page.goto('/');
+  await expect(page.getByRole('button', { name: 'フォルダからアプリを探す', exact: true })).toBeEnabled();
+  const panel = page.getByRole('region', { name: '作業用のエディタ・ターミナル', exact: true });
+  const editor = panel.getByRole('group', { name: 'エディタ', exact: true });
+  const terminal = panel.getByRole('group', { name: 'ターミナル', exact: true });
+  await editor.getByRole('button', { name: 'アプリを選ぶ', exact: true }).click();
+  await expect(editor).toContainText(platform === 'win32' ? 'Code' : 'TestEditor');
+  mode = 'cancel'; await terminal.getByRole('button', { name: 'アプリを選ぶ', exact: true }).click();
+  await expect(terminal).toContainText('未登録');
+  mode = 'error'; await terminal.getByRole('button', { name: 'アプリを選ぶ', exact: true }).click();
+  await expect(panel.getByRole('alert')).toContainText('テスト用の選択失敗');
+  mode = 'select'; await terminal.getByRole('button', { name: 'アプリを選ぶ', exact: true }).click();
+  await expect(terminal).toContainText(platform === 'win32' ? 'pwsh' : 'TestTerminal');
+  await page.getByRole('navigation', { name: 'メインメニュー' }).getByRole('link', { name: '設定・使い方', exact: true }).click();
+  await expect(editor).toContainText(platform === 'win32' ? 'Code' : 'TestEditor');
+  await page.reload();
+  await expect(terminal).toContainText(platform === 'win32' ? 'pwsh' : 'TestTerminal');
+  await editor.getByRole('button', { name: '登録を解除', exact: true }).click();
+  await expect(editor).toContainText('未登録');
+  await page.getByRole('navigation', { name: 'メインメニュー' }).getByRole('link', { name: 'ホーム', exact: true }).click();
+  await expect(editor).toContainText('未登録'); await expect(terminal).not.toContainText('未登録');
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+  await page.screenshot({ path: `docs/screenshots/first-run-tools-${platform}.png`, fullPage: true, animations: 'disabled' });
+  expect(launches).toBe(0);
 });

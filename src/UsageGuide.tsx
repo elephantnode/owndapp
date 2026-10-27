@@ -37,7 +37,7 @@ export function UsageGuide() {
     <details className="mt-6 rounded-md border px-4 py-3 max-md:px-3">
       <summary className="text-sm font-semibold">インストールと更新</summary>
       <div className={cn('mt-3 text-caption text-muted-foreground', wrap)}>
-        <p>macOS、またはWindowsのパス入力による利用に対応します（Windows実機は未検証）。Node.js 24.14.0以降が必要です。owndappのフォルダで、1行ずつ実行して結果を確かめてから次へ進みます。</p>
+        <p>macOS、またはWindowsのフォルダ選択・パス入力による利用に対応します（Windows実機は未検証）。Node.js 24.14.0以降が必要です。owndappのフォルダで、1行ずつ実行して結果を確かめてから次へ進みます。</p>
         <h3 className="mt-4 text-xs font-semibold text-foreground">はじめて入れる</h3>
         <Commands>{`npm run doctor
 npm audit --package-lock-only --audit-level=high
