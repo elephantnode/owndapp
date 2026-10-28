@@ -251,7 +251,7 @@ test('未読み取りや読み取り後に変わったプロジェクトは、�
     await writeFile(join(root, 'app/package-lock.json'), JSON.stringify({ lockfileVersion: 3, packages: { '': { dependencies: { lodash: '4.17.21' } },
       'node_modules/lodash': { version: '4.17.21', resolved: 'https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz' } } }));
     const job = await runCheck(call, ids);
-    assert.equal(job.status, 'done'); assert.equal(job.read, 2);
+    assert.equal(job.status, 'done'); assert.equal(job.read, 3);
     assert.deepEqual(job.result.results.map((r: any) => [r.name, r.status, r.count]), [['app', 'complete', 1], ['clean', 'complete', 1], ['unread', 'complete', 1]]);
     assert.equal(store.vulnerabilityCheck(unread)!.findings[0].dependency.version, '4.17.21');
     assert.equal(store.vulnerabilityCheck(app)!.snapshotReadAt, store.dependencySnapshots().get(app)!.readAt);
@@ -278,5 +278,31 @@ test('前回lockがなかったプロジェクトは、照会の前に読み直�
     const job = await runCheck(call, [later]);
     assert.equal(job.read, 1);
     assert.deepEqual(job.result.results.map((r: any) => [r.status, r.count]), [['complete', 1]]);
+  });
+});
+
+
+test('再照会はlock未変更でも毎回依存を読み直す', async () => {
+  await setup(async ({ store, call, ids }) => {
+    const [app] = ids;
+    const before = store.getHistory(app).filter(h => h.action === 'dependencies_read').length;
+    for (let i = 0; i < 2; i++) {
+      const job = await runCheck(call, [app]);
+      assert.equal(job.status, 'done'); assert.equal(job.read, 1);
+      assert.equal(store.vulnerabilityCheck(app)!.snapshotReadAt, store.dependencySnapshots().get(app)!.readAt);
+    }
+    assert.equal(store.getHistory(app).filter(h => h.action === 'dependencies_read').length, before + 2);
+  });
+});
+
+test('再照会の読み直しでフォルダが消えていたら古い依存を送らず前回の結果を保持する', async () => {
+  await setup(async ({ root, store, call, ids, sent }) => {
+    const [app] = ids;
+    assert.equal((await runCheck(call, [app])).status, 'done');
+    const previous = store.vulnerabilityCheck(app); sent.length = 0;
+    await rm(join(root, 'app'), { recursive: true });
+    const job = await runCheck(call, [app]);
+    assert.equal(job.status, 'failed'); assert.match(job.error, /依存情報を読み直せません/);
+    assert.deepEqual(sent, []); assert.deepEqual(store.vulnerabilityCheck(app), previous);
   });
 });

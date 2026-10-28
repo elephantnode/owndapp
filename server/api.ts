@@ -234,23 +234,23 @@ export function createApi(store: Store, port = 4310, pickFolder: FolderPicker = 
   };
   // Nothing is sent here: this only counts what a check would send.
   app.post('/api/vulnerabilities/preview', async c => c.json(previewVulnerabilities(store, await vulnerabilityIds(c))));
-  // A check runs in the background: first it reads dependencies that were never read or whose lockfiles changed,
-  // then queries OSV in batches and fetches details in parallel. The screen follows it through /api/vulnerabilities/job.
+  // Always refresh dependencies before querying, even when recorded file hashes match.
+  // The screen follows reading and querying through /api/vulnerabilities/job.
   let job: VulnerabilityJob | null = null;
   const runCheck = async (current: VulnerabilityJob, ids: string[]) => {
     try {
-      const stale: string[] = [];
+      Object.assign(current, { phase: 'reading', done: 0, total: ids.length });
       for (const id of ids) {
-        const project = store.project(id); const snapshot = store.dependencySnapshots().get(id);
-        if (await missing(project.path)) continue;
-        // Repeat when never read, a real read failed, a lock may have appeared where there was none, or recorded files changed.
-        const status = snapshot ? dependencyStatusOf(snapshot.files) : null;
-        if (!snapshot || status !== 'complete' || snapshot.files.some(f => f.status === 'no-lock') || await filesChanged(project.path, snapshot.files)) stale.push(id);
+        const status = await readDependencies(id);
+        if (status === 'error' || (status === 'missing' && store.dependencySnapshots().has(id))) {
+          Object.assign(current, { status: 'failed', error: '依存情報を読み直せませんでした。フォルダと読み取り権限を確認してください。照会せず前回の結果を残しています' });
+          current.finishedAt = new Date().toISOString();
+          return;
+        }
+        if (status !== 'missing') current.read++;
+        current.done++;
       }
-      Object.assign(current, { phase: 'reading', done: 0, total: stale.length });
-      for (const id of stale) { await readDependencies(id); current.done++; }
       const result = await checkVulnerabilities(store, osv, ids, { ...osvOptions, onProgress: (phase, done, total) => Object.assign(current, { phase, done, total }) });
-      current.read = stale.length;
       if (result.queried === 0 && result.failed > 0) Object.assign(current, { status: 'failed', error: 'OSVに接続できませんでした。ネットワークを確認してください。前回の結果は残しています' });
       else Object.assign(current, { status: 'done', result });
     } catch { Object.assign(current, { status: 'failed', error: '照会を完了できませんでした。前回の結果は残しています' }); }

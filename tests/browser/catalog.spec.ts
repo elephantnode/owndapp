@@ -1178,3 +1178,35 @@ for (const platform of ['darwin', 'win32']) test(`${platform}: 初回ホーム�
   await page.screenshot({ path: `docs/screenshots/first-run-tools-${platform}.png`, fullPage: true, animations: 'disabled' });
   expect(launches).toBe(0);
 });
+
+test('進捗と完了通知はスクロールしても画面上部中央に表示される', async ({ page }) => {
+  let running = true;
+  await page.route('**/api/dependencies/progress', route => route.fulfill({ json: { running, done: 2, total: 10 } }));
+  await page.route('**/api/git/progress', route => route.fulfill({ json: { running, done: 3, total: 10 } }));
+  await page.route('**/api/vulnerabilities/job', route => route.fulfill({ json: { job: {
+    id: 'mock-progress', status: running ? 'running' : 'done', phase: 'querying', projects: 10, done: 25, total: 100, read: 10,
+    result: { results: [] },
+  } } }));
+  await page.goto('/#settings');
+  const notifications = page.getByRole('region', { name: '作業の進捗と通知', exact: true });
+  await expect(notifications).toContainText('脆弱性を照会中');
+  await expect(notifications).toContainText('依存情報を読み取り中');
+  await expect(notifications).toContainText('Git情報を読み取り中');
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  expect(await page.evaluate(() => scrollY)).toBeGreaterThan(100);
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect(notifications).toBeInViewport();
+    const box = await notifications.boundingBox();
+    expect(box!.y).toBeGreaterThanOrEqual(0); expect(box!.y).toBeLessThan(24);
+    expect(Math.abs(box!.x + box!.width / 2 - width / 2)).toBeLessThan(2);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+    await page.screenshot({ path: `docs/screenshots/progress-alert-${width}.png`, animations: 'disabled' });
+  }
+  running = false;
+  await expect(notifications).not.toContainText('脆弱性を照会中');
+  await expect(notifications).toContainText('照会しました');
+  await expect(notifications.getByRole('status')).toBeInViewport();
+  await notifications.getByRole('button', { name: '通知を閉じる', exact: true }).click();
+  await expect(notifications.getByRole('status')).toHaveCount(0);
+});

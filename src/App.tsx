@@ -681,7 +681,7 @@ export function App() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [excluding, setExcluding] = useState<string[] | null>(null);
-  // A toast stays in view wherever the page is scrolled, unlike the notice at the top. Used after saving the detail form.
+  // Detail saves share the fixed notification area and expire after four seconds.
   const [toast, setToast] = useState<{ id: number; text: string } | null>(null);
   // The notice at the top belongs to an earlier action by then, so it goes.
   const showToast = (text: string) => { setNotice(''); setToast({ id: Date.now(), text }); };
@@ -915,17 +915,6 @@ export function App() {
         <span className="ml-auto shrink-0 font-mono text-micro whitespace-nowrap">Local only</span></div>
 
       {projectArea && !detail && <nav aria-label="登録したアプリの表示" className="mb-6 mt-3 flex flex-wrap gap-2 border-b pb-3">{projectTabs.map(tab => <a key={tab.id} href={`#${tab.id}`} aria-current={view === tab.id ? 'page' : undefined} onClick={e => { e.preventDefault(); if (navigate(tab.id)) clearFilters(); }} className={cn('inline-flex min-h-10 items-center gap-2 rounded-md px-3 text-caption no-underline hover:bg-accent', view === tab.id && 'bg-brand-subtle font-semibold text-brand')}><tab.icon size={15} />{tab.label}</a>)}</nav>}
-      {error && <Alert variant="destructive" className="mb-6"><CircleAlert size={18} /><AlertDescription>{error}</AlertDescription><Button variant="ghost" size="sm" className="min-h-6 text-inherit hover:bg-transparent hover:underline" onClick={() => void initialize()}>再接続</Button></Alert>}
-      {problem && <Alert variant="destructive" className="mb-6"><CircleAlert size={18} /><AlertDescription>{problem}</AlertDescription><Button variant="ghost" size="icon" className="size-6 text-inherit hover:bg-transparent max-md:size-8" aria-label="エラーを閉じる" onClick={() => setProblem('')}><X size={16} /></Button></Alert>}
-      {scanRunning && initialScan && <ScanBanner scan={initialScan} open={() => navigate('discover')} />}
-      {dependencyProgress && <div aria-live="polite" className="mb-6 flex items-center gap-2 rounded-md border bg-raised px-4 py-3 text-xs text-dim tabular-nums">
-        <Package size={16} className="shrink-0 text-brand" />依存情報を読み取り中 {dependencyProgress.done} / {dependencyProgress.total}件<span className="text-muted-foreground max-md:hidden">この端末の中で読むだけで、外部には送りません</span></div>}
-      {gitProgress && <div aria-live="polite" className="mb-6 flex items-center gap-2 rounded-md border bg-raised px-4 py-3 text-xs text-dim tabular-nums">
-        <GitBranch size={16} className="shrink-0 text-brand" />Git情報を読み取り中 {gitProgress.done} / {gitProgress.total}件<span className="text-muted-foreground max-md:hidden">この端末の `.git` だけを読みます。fetch はしません</span></div>}
-      {vulnerabilityJob && <div aria-live="polite" className="mb-6 flex flex-wrap items-center gap-2 rounded-md border bg-raised px-4 py-3 text-xs text-dim tabular-nums">
-        <ShieldAlert size={16} className="shrink-0 text-brand" />{vulnerabilityJob.projects}件の脆弱性を照会中: {jobPhaseLabels[vulnerabilityJob.phase]} {vulnerabilityJob.done.toLocaleString()} / {vulnerabilityJob.total.toLocaleString()}
-        <span className="text-muted-foreground max-md:hidden">終わると結果を表示します。この画面を離れても続きます</span></div>}
-      {notice && <Alert variant="success" role="status" className="mb-6"><Check size={18} /><AlertDescription>{notice}</AlertDescription><Button variant="ghost" size="icon" className="size-6 text-inherit hover:bg-transparent max-md:size-8" aria-label="通知を閉じる" onClick={() => setNotice('')}><X size={16} /></Button></Alert>}
       {!ready ? <Empty><Layers size={34} /><h1 className={emptyTitle}>カタログに接続しています</h1><p className={emptyText}>ローカルの保存データを読み込みます。</p></Empty> : detail ? current ?
         <ProjectDetail key={current.id} project={current} checkVulnerabilities={() => setChecking({ ids: [current.id] })} reloadProjects={() => reload().then(() => {})} apps={registeredApps} open={role => open(current, role)} openSettings={() => navigate('settings')} reveal={() => reveal(current)} remove={reason => setRemoving({ projects: [current], reason })} exclude={() => setExcluding([current.path])} onDirty={value => { unsaved.current = value; }} back={() => { unsaved.current = false; setDetail(null); location.hash = view; }} saved={async () => { await reload(); showToast('アプリを保存しました'); }} /> :
         <Empty><h1 className={emptyTitle}>アプリが見つかりません</h1><Button onClick={() => navigate('catalog')}>カタログに戻る</Button></Empty> :
@@ -933,7 +922,7 @@ export function App() {
         view === 'attention' ? <AttentionView projects={projects} issues={issues} layout={layout} chooseLayout={chooseLayout} apps={registeredApps} open={open} reveal={reveal}
           reloadProjects={reload} notify={setNotice} openSettings={() => navigate('settings')} toDiscover={() => navigate('discover')}
           check={(ids, label) => setChecking({ ids, label })} remove={(list, reason) => setRemoving({ projects: list, reason })}
-          readDependencies={async ids => { setProblem(''); try { const { summary } = await readDependencies(ids); await reload(); setNotice(`${ids.length}件の依存情報を読み直しました（${summary}）`); } catch (e) { setProblem((e as Error).message); } }}
+          readDependencies={async ids => { setProblem(''); setReadingSelectedDependencies(true); try { const { summary } = await readDependencies(ids); await reload(); setNotice(`${ids.length}件の依存情報を読み直しました（${summary}）`); } catch (e) { setProblem((e as Error).message); } finally { setReadingSelectedDependencies(false); } }}
           fillPurposes={async () => { setProblem(''); try { const { checked, filled } = await request<{ checked: number; filled: number }>('/purposes/fill', {}); await reload(); setNotice(`用途が空の${checked}件のうち${filled}件に、READMEなどの説明から用途を入れました${checked > filled ? `（${checked - filled}件は使える説明が見つかりませんでした）` : ''}`); } catch (e) { setProblem((e as Error).message); } }}
           showUntriaged={() => { if (navigate('catalog')) { clearFilters(); setLifecycle('untriaged'); } }} toDependencies={() => navigate('dependencies')} /> :
         view === 'settings' ? <SettingsView apps={apps} changed={setApps} toDiscover={() => navigate('discover')} /> :
@@ -1048,11 +1037,26 @@ export function App() {
         </section>
       </>}
     </main>
+    <section aria-label="作業の進捗と通知" className="pointer-events-none fixed top-[max(16px,env(safe-area-inset-top))] left-1/2 z-30 grid max-h-[45dvh] w-[min(640px,calc(100vw-32px))] -translate-x-1/2 gap-2 overflow-y-auto rounded-md [&>*]:pointer-events-auto">
+      {error && <Alert variant="destructive" className="shadow-dialog"><CircleAlert size={18} /><AlertDescription>{error}</AlertDescription><Button variant="ghost" size="sm" className="min-h-6 text-inherit hover:bg-transparent hover:underline" onClick={() => void initialize()}>再接続</Button></Alert>}
+      {problem && <Alert variant="destructive" className="shadow-dialog"><CircleAlert size={18} /><AlertDescription>{problem}</AlertDescription><Button variant="ghost" size="icon" className="size-6 text-inherit hover:bg-transparent max-md:size-8" aria-label="エラーを閉じる" onClick={() => setProblem('')}><X size={16} /></Button></Alert>}
+      {initialScan?.status === 'running' && <Alert role="status" className="shadow-dialog"><FolderSearch size={18} className="text-brand" /><AlertDescription>フォルダを探索中。{(initialScan.visited ?? 0).toLocaleString()}項目を確認<Button variant="link" size="sm" onClick={() => navigate('discover')}>探索の詳細</Button></AlertDescription></Alert>}
+      {dependencyProgress && <div role="status" className="shadow-dialog flex items-center gap-2 rounded-md border bg-raised px-4 py-3 text-xs text-dim tabular-nums">
+        <Package size={16} className="shrink-0 text-brand" />依存情報を読み取り中 {dependencyProgress.done} / {dependencyProgress.total}件<span className="text-muted-foreground max-md:hidden">この端末の中で読むだけで、外部には送りません</span></div>}
+      {gitProgress && <div role="status" className="shadow-dialog flex items-center gap-2 rounded-md border bg-raised px-4 py-3 text-xs text-dim tabular-nums">
+        <GitBranch size={16} className="shrink-0 text-brand" />Git情報を読み取り中 {gitProgress.done} / {gitProgress.total}件<span className="text-muted-foreground max-md:hidden">この端末の `.git` だけを読みます。fetch はしません</span></div>}
+      {vulnerabilityJob && <div role="status" className="shadow-dialog flex flex-wrap items-center gap-2 rounded-md border bg-raised px-4 py-3 text-xs text-dim tabular-nums">
+        <ShieldAlert size={16} className="shrink-0 text-brand" />{vulnerabilityJob.projects}件の脆弱性を照会中: {jobPhaseLabels[vulnerabilityJob.phase]} {vulnerabilityJob.done.toLocaleString()} / {vulnerabilityJob.total.toLocaleString()}
+        <span className="text-muted-foreground max-md:hidden">終わると結果を表示します。この画面を離れても続きます</span></div>}
+      {notice && <Alert variant="success" role="status" className="shadow-dialog"><Check size={18} /><AlertDescription>{notice}</AlertDescription><Button variant="ghost" size="icon" className="size-6 text-inherit hover:bg-transparent max-md:size-8" aria-label="通知を閉じる" onClick={() => setNotice('')}><X size={16} /></Button></Alert>}
+      {!dependencyProgress && (readingDependencies || readingSelectedDependencies) && <Alert role="status" className="shadow-dialog"><Package size={18} className="text-brand" /><AlertDescription>依存情報を読み取り中…</AlertDescription></Alert>}
+      {!gitProgress && readingGit && <Alert role="status" className="shadow-dialog"><GitBranch size={18} className="text-brand" /><AlertDescription>Git情報を読み取り中…</AlertDescription></Alert>}
     {toast && <Alert key={toast.id} variant="success" role="status"
-      className="toast-in fixed right-6 bottom-6 z-30 w-auto max-w-[min(440px,calc(100vw-32px))] items-center gap-3 rounded-lg border border-transparent bg-primary py-4 pr-3 pl-4 text-sm font-semibold text-primary-foreground shadow-dialog [&>svg]:mt-0 max-md:right-4 max-md:bottom-4 max-md:left-4 max-md:max-w-none">
+      className="items-center shadow-dialog">
       <Check size={20} strokeWidth={2.5} /><AlertDescription>{toast.text}</AlertDescription>
       <Button variant="ghost" size="icon" className="ml-2 size-8 text-inherit hover:bg-white/15" aria-label="通知を閉じる" onClick={() => setToast(null)}><X size={17} /></Button>
     </Alert>}
+    </section>
     {excluding && <ExcludeDialog paths={excluding} projects={projects} close={() => { setExcluding(null); void reload().catch(error => setProblem((error as Error).message)); }} excluded={async (registered, removed) => {
       setExcluding(null);
       let refreshed: Project[];
@@ -1633,7 +1637,7 @@ function VulnerabilityDialog({ ids, label, close, started }: { ids: string[]; la
           {preview.notSent.unknown > 0 && <span className="mt-1 block text-muted-foreground">取得元不明の依存は、「依存情報を読む」で読み直すと照会できる場合があります（lockに取得元が書かれていない版を、設定済みのレジストリのものとして扱うようにしたため）</span>}</dd>
         {preview.notRead.length > 0 && <><dt className="text-muted-foreground">先に読み取り</dt><dd className={wrap}>依存を読み取っていない{preview.notRead.length}件（{preview.notRead.slice(0, 3).join('、')}{preview.notRead.length > 3 ? ' ほか' : ''}）は、照会の前にこの端末で読み取ります</dd></>}
         {preview.reread.length > 0 && <><dt className="text-muted-foreground">読み直し</dt><dd className={wrap}>前回lockがなかった・一部しか読めなかった{preview.reread.length}件（{preview.reread.slice(0, 3).join('、')}{preview.reread.length > 3 ? ' ほか' : ''}）は、照会の前に読み直します</dd></>}
-        <dt className="text-muted-foreground">進め方</dt><dd>裏側で進め、画面上部に進み具合を出します。読み取り後にlockが変わったものも読み直します。OSVが混み合っているときは待って再試行します</dd>
+        <dt className="text-muted-foreground">進め方</dt><dd>裏側で進め、画面上部に進み具合を出します。照会前に毎回、対象の依存情報を読み直します。表示の種類数は保存済み情報による目安で、読み直し後に変わる場合があります。OSVが混み合っているときは待って再試行します</dd>
         {preview.nothingToSend.length > 0 && <><dt className="text-muted-foreground">照会なし</dt><dd><ul className="grid gap-1">{preview.nothingToSend.slice(0, 5).map(p => <li key={p.name} className={wrap}>{p.name}: {nothingToSendLabels[p.reason]}</li>)}
           {preview.nothingToSend.length > 5 && <li className="text-muted-foreground">ほか{preview.nothingToSend.length - 5}件</li>}</ul></dd></>}
       </dl>}
