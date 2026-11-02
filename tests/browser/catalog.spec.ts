@@ -510,15 +510,20 @@ test('登録してチェック・送信前の確認・同じ内容の読み直�
   await expect(page.getByRole('status').filter({ hasText: '1件の依存情報を読み取りました（完了1件）' })).toBeVisible();
   await expect(row).toContainText('時点');
   await expect(stale).toHaveCount(0);
+  // 登録したアプリ offers the same check beside アプリを追加.
+  await page.getByRole('button', { name: /^診断可能\d+件をチェック$/ }).click();
+  await expect(page.getByRole('dialog')).toContainText('脆弱性診断可能なアプリ（アーカイブ以外）の');
+  await page.getByRole('dialog').getByRole('button', { name: 'キャンセル' }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
   await page.getByRole('link', { name: '脆弱性と対応', exact: true }).click();
   const queue = page.getByRole('list', { name: 'アプリごとの脆弱性' });
   await expect(queue).toContainText('ledger-app');
   await expect(stale).toHaveCount(0);
   await expect(page.getByRole('region', { name: /結果が古い/ })).toHaveCount(0);
 
-  // The head of 脆弱性と対応 checks every project outside the archive, through the same confirmation.
-  await page.getByRole('button', { name: /^監視対象\d+件をチェック$/ }).click();
-  await expect(page.getByRole('dialog')).toContainText('監視対象（アーカイブ以外）の');
+  // The head of 脆弱性と対応 checks every diagnosable project outside the archive, through the same confirmation.
+  await page.getByRole('button', { name: /^診断可能\d+件をチェック$/ }).click();
+  await expect(page.getByRole('dialog')).toContainText('脆弱性診断可能なアプリ（アーカイブ以外）の');
   await expect(page.getByRole('dialog')).toContainText('https://api.osv.dev');
   await page.getByRole('dialog').getByRole('button', { name: 'キャンセル' }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
@@ -545,7 +550,14 @@ test('Swift未対応をlockなしや用途の未入力と混同しない', async
   await page.getByRole('checkbox', { name: 'unhandled-swiftを登録候補に選択' }).check();
   await page.getByRole('button', { name: '選択した候補を登録', exact: true }).click();
   const row = page.getByRole('row').filter({ has: page.getByRole('link', { name: 'unhandled-swift', exact: true }) });
-  await expect(row).toContainText('依存解析は未対応');
+  await expect(row).toContainText('診断対象外');
+  await expect(row).toContainText('依存解析が未対応の形式です');
+  // Counted apart from what a check can send, so it never sits in 未チェック.
+  const totals = page.getByRole('region', { name: '集計（アーカイブ以外）' });
+  await expect(totals).toContainText(/診断対象外 [1-9]\d*件/);
+  await page.getByRole('link', { name: '脆弱性と対応', exact: true }).click();
+  await expect(page.getByLabel('チェック範囲')).toContainText(/診断対象外[1-9]\d*件/);
+  await page.goBack();
   await row.getByRole('link', { name: 'unhandled-swift', exact: true }).click();
   await expect(page.getByText('依存解析は未対応', { exact: true })).toBeVisible();
   await expect(page.getByText(/SwiftPM の依存解析は未対応/)).toBeVisible();

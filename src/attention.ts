@@ -18,8 +18,12 @@ export function issuesOf(p: Project): IssueKind[] {
 }
 export const hasIssue = (p: Project) => issuesOf(p).length > 0;
 export const needsTriage = (p: Project) => p.lifecycle === 'untriaged' || !p.purpose;
-/** npm dependencies were read but never checked for known vulnerabilities. */
-export const unchecked = (p: Project) => !p.vulnerabilities && (p.dependencyStatus === 'complete' || p.dependencyStatus === 'partial');
+/** Out of scope for vulnerability checks: dependencies were read and none can be sent (no lockfile, unsupported format, only Git or local references). */
+export const outOfScope = (p: Project) => p.diagnosable === false;
+/** Diagnosable, or not read yet: a check reads dependencies first, so those are still worth sending. */
+export const diagnosable = (p: Project) => !outOfScope(p);
+/** Diagnosable dependencies were read but never checked for known vulnerabilities. */
+export const unchecked = (p: Project) => !p.vulnerabilities && p.diagnosable === true;
 export const unread = (p: Project) => !p.dependencyStatus;
 
 const severityRank: Record<Severity, number> = { malicious: 5, critical: 4, high: 3, moderate: 2, low: 1, unknown: 0 };

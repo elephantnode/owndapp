@@ -26,7 +26,7 @@ import { allPaths, buildTree, withinPath, type TreeNode } from './catalog-tree';
 import { buildMemo } from './memo';
 import { priorityRank, severityRank, compareQueueItems } from '../shared/priority';
 import { groupFindings, severityCounts, type FindingGroup } from './findings';
-import { groupIssues, hasIssue, issueKinds, needsTriage, type IssueKind } from './attention';
+import { diagnosable, groupIssues, hasIssue, issueKinds, needsTriage, outOfScope, type IssueKind } from './attention';
 
 type View = 'home' | 'attention' | 'catalog' | 'dependencies' | 'discover' | 'archive' | 'settings';
 const navItems = [
@@ -124,12 +124,13 @@ function ProjectStatus({ project }: { project: Project }) {
   </> : project.excluded ? <>
     <div className="flex items-center gap-1.5 text-warning"><EyeOff size={14} className="shrink-0" />除外設定のフォルダにあります</div>
     <span className="mt-1 block text-micro text-muted-foreground">カタログから外せます</span>
-  </> : project.vulnerabilities && (project.vulnerabilities.count || project.vulnerabilities.stale) ? <VulnerabilityLine summary={project.vulnerabilities} /> : project.dependencyStatus === 'failed' || project.dependencyStatus === 'partial' ? <>
-    <div className="flex items-center gap-1.5 text-warning"><ShieldQuestion size={14} className="shrink-0" />{project.dependencyUnsupported && project.dependencyStatus === 'failed' ? '依存解析は未対応' : project.dependencyStatus === 'partial' ? '依存の一部が未確認' : '依存を読み取れません'}</div>
+  </> : project.vulnerabilities && (project.vulnerabilities.count || project.vulnerabilities.stale) ? <VulnerabilityLine summary={project.vulnerabilities} /> : project.dependencyStatus === 'partial' ? <>
+    <div className="flex items-center gap-1.5 text-warning"><ShieldQuestion size={14} className="shrink-0" />依存の一部が未確認</div>
     <span className="mt-1 block text-micro text-muted-foreground">詳細で読み取れない形式・ファイルを確認できます</span>
-  </> : project.dependencyStatus === 'no-lock' ? <>
-    <div className="flex items-center gap-1.5 text-warning"><ShieldQuestion size={14} className="shrink-0" />依存を判定できません</div>
-    <span className="mt-1 block text-micro text-muted-foreground">lockなし・検査未対応の形式。詳細で理由を確認できます</span>
+  </> : project.diagnosable === false ? <>
+    {/* Unreadable files are a problem to fix; the other reasons are simply outside what a check covers. */}
+    <div className={cn('flex items-center gap-1.5', project.dependencyStatus === 'failed' && !project.dependencyUnsupported ? 'text-warning' : 'text-muted-foreground')}><ShieldQuestion size={14} className="shrink-0" />診断対象外</div>
+    <span className="mt-1 block text-micro text-muted-foreground">{project.dependencyStatus === 'no-lock' ? 'lockファイルがありません' : project.dependencyStatus === 'failed' ? project.dependencyUnsupported ? '依存解析が未対応の形式です' : '依存を読み取れません。詳細で確認できます' : '依存がないか、Git・ローカル参照など照会できない依存だけです'}</span>
   </> : <>
     <div className={cn('flex items-center gap-1.5', needsAttention(project) ? 'text-warning' : 'text-muted-foreground')}><CircleAlert size={14} className="shrink-0" />{project.lifecycle === 'untriaged' ? '用途・状態を整理' : !project.purpose ? '用途が未入力' : project.vulnerabilities ? '既知の脆弱性は見つかっていません' : '脆弱性は未照会'}</div>
     <span className="mt-1 block text-micro text-muted-foreground">{project.evidence.some(e => e.detail.includes('失敗')) ? '構成の一部を読み取れません' : project.vulnerabilities ? `${date(project.vulnerabilities.checkedAt)}時点` : project.dependencyStatus ? '依存は読み取り済み' : '依存・脆弱性は未確認'}</span>
@@ -380,6 +381,9 @@ const issueText: Record<IssueKind, { title: string; text: string }> = {
 // One check accepts this many projects, as the API does.
 const checkLimit = 1000;
 const freshness = (p: Project) => !p.vulnerabilities ? 0 : p.vulnerabilities.stale || p.vulnerabilities.status === 'partial' ? 1 : 2;
+// Every monitored project, those never checked or out of date first, within what one check accepts.
+const checkAllLabel = (count: number) => count > checkLimit ? `診断可能のうち${checkLimit}件をチェック` : `診断可能${count}件をチェック`;
+const monitoredCheckIds = (monitored: Project[]) => [...monitored].sort((a, b) => freshness(a) - freshness(b) || (a.vulnerabilities?.checkedAt ?? '').localeCompare(b.vulnerabilities?.checkedAt ?? '')).slice(0, checkLimit).map(p => p.id);
 
 // 対応する: the response queue first, then the other problems by kind, then what has not been checked yet.
 // Known vulnerabilities are listed once, in the queue. Triage (purpose, lifecycle) stays a small line at the end.
@@ -397,17 +401,16 @@ function AttentionView({ projects, issues, layout, chooseLayout, apps, open, rev
     : <Button size="sm" onClick={() => void readDependencies(list.map(p => p.id))}><RefreshCw size={15} />{list.length}件を読み直す</Button>;
   const sections = issueKinds.filter(kind => kind !== 'vulnerable' && issues.groups.get(kind)!.length);
   const monitored = projects.filter(p => p.lifecycle !== 'archived');
-  const unavailable = monitored.filter(p => p.dependencyStatus === 'no-lock' || p.dependencyStatus === 'failed');
-  const remaining = monitored.filter(p => !unavailable.includes(p));
+  const unavailable = monitored.filter(outOfScope);
+  const remaining = monitored.filter(diagnosable);
   const unchecked = remaining.filter(p => !p.vulnerabilities);
   const recheck = remaining.filter(p => p.vulnerabilities && (p.vulnerabilities.stale || p.vulnerabilities.status === 'partial' || p.dependencyStatus === 'partial'));
   const current = remaining.length - unchecked.length - recheck.length;
-  // Every monitored project, those never checked or out of date first, within what one check accepts.
-  const checkAll = [...monitored].sort((a, b) => freshness(a) - freshness(b) || (a.vulnerabilities?.checkedAt ?? '').localeCompare(b.vulnerabilities?.checkedAt ?? '')).slice(0, checkLimit).map(p => p.id);
+  const checkAll = monitoredCheckIds(remaining);
   const header = <PageHeader context="あなたの開発アプリ" title="脆弱性と対応" subtitle="既知の脆弱性を優先度の高い順に進めます。止まっている確認と、まだ確認していないものは下にまとめます。">
-    {monitored.length > 0 && <Button variant="default" className="max-lg:px-3 max-lg:text-xs" title="アーカイブ以外のアプリをOSVに照会します。送る内容は照会の前に確認できます"
-      onClick={() => check(checkAll, `監視対象（アーカイブ以外）の${checkAll.length}件`)}>
-      <ShieldAlert size={17} />{monitored.length > checkLimit ? `監視対象のうち${checkLimit}件をチェック` : `監視対象${monitored.length}件をチェック`}</Button>}
+    {remaining.length > 0 && <Button variant="default" className="max-lg:px-3 max-lg:text-xs" title="脆弱性診断可能なアプリ（アーカイブ以外）をOSVに照会します。送る内容は照会の前に確認できます"
+      onClick={() => check(checkAll, `脆弱性診断可能なアプリ（アーカイブ以外）の${checkAll.length}件`)}>
+      <ShieldAlert size={17} />{checkAllLabel(remaining.length)}</Button>}
   </PageHeader>;
   if (!projects.length) return <>{header}<Empty>
     <div className="mb-4 text-brand"><FolderSearch size={32} /></div>
@@ -417,7 +420,7 @@ function AttentionView({ projects, issues, layout, chooseLayout, apps, open, rev
   </Empty></>;
   return <>
     {header}
-    <p className="mb-6 border-y py-3 text-caption text-muted-foreground tabular-nums" aria-label="チェック範囲">監視対象 {monitored.length}アプリ · 最新結果 {current} · 要再確認 {recheck.length} · 未検査 {unchecked.length} · 判定できない {unavailable.length}<span className="mt-1 block">アーカイブ{projects.length - monitored.length}件は対象外。対応するlock形式の依存が対象で、公開先の稼働・反映は未確認です。{monitored.length > checkLimit && `チェックは1回${checkLimit}件までで、未検査・要再確認のものから選びます。`}</span></p>
+    <p className="mb-6 border-y py-3 text-caption text-muted-foreground tabular-nums" aria-label="チェック範囲">脆弱性診断可能 {remaining.length}アプリ · 最新結果 {current} · 要再確認 {recheck.length} · 未チェック {unchecked.length}<span className="mt-1 block">診断対象外{unavailable.length}件（照会できる依存がない）とアーカイブ{projects.length - monitored.length}件は含みません。対応するlock形式の依存が対象で、公開先の稼働・反映は未確認です。{remaining.length > checkLimit && `チェックは1回${checkLimit}件までで、未チェック・要再確認のものから選びます。`}</span></p>
     <QueueView projects={projects} reloadProjects={reloadProjects} notify={notify} check={check} apps={apps} open={open} openSettings={openSettings} hasUnchecked={issues.unchecked.length > 0} />
     {sections.length > 0 && <div className="mb-4 flex flex-wrap items-end justify-between gap-3 border-t pt-8">
       <div><h2 className="text-base font-semibold">ほかに確認が必要なもの</h2>
@@ -447,11 +450,11 @@ function AttentionView({ projects, issues, layout, chooseLayout, apps, open, rev
       <h2 id="not-yet" className="mb-1 text-sm font-semibold">まだ確認していないもの</h2>
       <p className="mb-4 text-caption text-muted-foreground">問題が見つかったわけではありません。確認が済むまでは、安全とも言えません。</p>
       <dl className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-3 text-xs">
-        <dt>脆弱性をまだチェックしていない（lockあり）<span className="ml-2 text-muted-foreground tabular-nums">{issues.unchecked.length}件</span></dt>
+        <dt>脆弱性診断可能で、まだチェックしていない<span className="ml-2 text-muted-foreground tabular-nums">{issues.unchecked.length}件</span></dt>
         <dd>{issues.unchecked.length > 0 && <Button size="sm" onClick={() => check(issues.unchecked.map(p => p.id))}><ShieldAlert size={15} />{issues.unchecked.length}件をチェック</Button>}</dd>
         <dt>依存情報をまだ読み取っていない<span className="ml-2 text-muted-foreground tabular-nums">{issues.unread.length}件</span></dt>
         <dd>{issues.unread.length > 0 && <Button size="sm" onClick={toDependencies}><Package size={15} />依存検索でまとめて読み取る</Button>}</dd>
-        <dt>判定できる依存がない・読み取り失敗<span className="ml-2 text-muted-foreground tabular-nums">{unavailable.length}件</span><span className="mt-0.5 block">lockなし・未対応の形式など。脆弱性なしとは判定していません。</span></dt>
+        <dt>診断対象外<span className="ml-2 text-muted-foreground tabular-nums">{unavailable.length}件</span><span className="mt-0.5 block">照会できる依存がありません（lockなし・未対応の形式・Gitやローカル参照のみなど）。脆弱性なしとは判定していません。</span></dt>
         <dd>{unavailable.length > 0 && <Button size="sm" onClick={toDependencies}>依存情報を確認</Button>}</dd>
       </dl>
       <div className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-2 border-t pt-4 text-caption text-muted-foreground">
@@ -865,8 +868,10 @@ export function App() {
   // Every catalog total counts projects outside the archive, like 要対応.
   const activeProjects = projects.filter(p => p.lifecycle !== 'archived');
   const activeCount = activeProjects.length;
-  const checkedCount = activeProjects.filter(p => p.vulnerabilities).length;
-  const vulnerableCount = activeProjects.filter(p => p.vulnerabilities?.count).length;
+  // Checks only count among diagnosable projects; the rest have nothing a check can send.
+  const diagnosableProjects = activeProjects.filter(diagnosable);
+  const checkedCount = diagnosableProjects.filter(p => p.vulnerabilities).length;
+  const vulnerableCount = diagnosableProjects.filter(p => p.vulnerabilities?.count).length;
   const issues = useMemo(() => groupIssues(projects), [projects]);
   const attentionCount = issues.issueCount;
   const pageSelected = rows.length > 0 && rows.every(p => selected.has(p.id)) ? true : rows.some(p => selected.has(p.id)) ? 'indeterminate' : false;
@@ -949,16 +954,22 @@ export function App() {
         }} changed={setInitialScan}
           exclusionsChanged={() => reload().catch(e => setProblem((e as Error).message))} showExcluded={() => { if (navigate('catalog')) { clearFilters(); setOnly('excluded'); } }} /> : <>
         <PageHeader context="あなたの開発アプリ" title={view === 'archive' ? 'アーカイブ' : '登録したアプリ'} subtitle={view === 'archive' ? '過去の取り組みと、再開に必要な記録を残す。' : '作ったものを把握して、次の対応を決める。'}>
-          <Button variant="default" className="max-lg:px-3 max-lg:text-xs" onClick={() => navigate('discover')}><Plus size={17} />アプリを追加</Button>
+          <div className="flex flex-wrap gap-2"><Button variant="default" className="max-lg:px-3 max-lg:text-xs" onClick={() => navigate('discover')}><Plus size={17} />アプリを追加</Button>
+          {view === 'catalog' && diagnosableProjects.length > 0 && <Button variant="outline" className="max-lg:px-3 max-lg:text-xs" title="脆弱性診断可能なアプリ（アーカイブ以外）をOSVに照会します。送る内容は照会の前に確認でき、始めると「脆弱性と対応」に移ります"
+            onClick={() => { const ids = monitoredCheckIds(diagnosableProjects); setChecking({ ids, label: `脆弱性診断可能なアプリ（アーカイブ以外）の${ids.length}件` }); }}>
+            <ShieldAlert size={17} />{checkAllLabel(diagnosableProjects.length)}</Button>}</div>
         </PageHeader>
         {batch && view === 'catalog' && projects.some(p => p.importBatch === batch && p.lifecycle !== 'archived') && <section aria-label="登録後の次のステップ" className="mb-6 rounded-lg border bg-raised p-4"><h2 className="mb-1 text-sm font-semibold">次は、登録したアプリの脆弱性をチェック</h2><p className="mb-3 text-caption text-muted-foreground">用途・タグの入力は任意です。外部へ送るパッケージ情報を確認してからチェックを始めます。</p><Button onClick={() => setChecking({ ids: projects.filter(p => p.importBatch === batch && p.lifecycle !== 'archived').slice(0, checkLimit).map(p => p.id), label: '今回登録したアプリ' })}>登録したアプリの脆弱性をチェック</Button><Button className="ml-2" variant="ghost" onClick={() => navigate('attention')}>優先度の高いものから対応</Button></section>}
-        <section aria-label="集計（アーカイブ以外）" className="mb-8 grid grid-cols-[1fr_1fr_1fr_1fr_2.4fr] gap-6 border-y py-6 max-xl:grid-cols-4 max-xl:gap-4 max-md:mb-6 max-md:grid-cols-2 max-md:py-4">
-          {([['登録（アーカイブ以外）', activeCount], ['要対応', attentionCount], ['既知の脆弱性あり', vulnerableCount], ['脆弱性をチェック済み', checkedCount]] as const).map(([label, count], i) =>
-            <div key={label} className="flex flex-col gap-2"><span className="text-xs text-dim max-md:text-micro">{label}</span><strong className={cn('text-title leading-[1.2] font-medium tabular-nums max-md:text-2xl', i === 0 && 'text-brand', i === 2 && count > 0 && 'text-error')}>{count}<small className="ml-1.5 text-caption font-normal text-muted-foreground">アプリ</small></strong></div>)}
+        <section aria-label="集計（アーカイブ以外）" className="mb-8 grid grid-cols-[repeat(5,minmax(0,1fr))_2fr] gap-6 border-y py-6 max-xl:grid-cols-5 max-xl:gap-4 max-md:mb-6 max-md:grid-cols-2 max-md:py-4">
+          {/* 脆弱性診断可能 → チェック済み → 既知の脆弱性あり each count within the one before. */}
+          {([['登録（アーカイブ以外）', activeCount, ''], ['要対応', attentionCount, ''], ['脆弱性診断可能', diagnosableProjects.length, `診断対象外 ${activeCount - diagnosableProjects.length}件`],
+            ['チェック済み', checkedCount, `未チェック ${diagnosableProjects.length - checkedCount}件`], ['既知の脆弱性あり', vulnerableCount, `チェック済み${checkedCount}件のうち`]] as const).map(([label, count, note], i) =>
+            <div key={label} className="flex flex-col gap-2"><span className="text-xs text-dim max-md:text-micro">{label}</span><strong className={cn('text-title leading-[1.2] font-medium tabular-nums max-md:text-2xl', i === 0 && 'text-brand', i === 4 && count > 0 && 'text-error')}>{count}<small className="ml-1.5 text-caption font-normal text-muted-foreground">アプリ</small></strong>
+              {note && <span className="text-caption text-muted-foreground tabular-nums">{note}</span>}</div>)}
           <div className="flex items-center gap-3 border-l pl-6 text-dim max-xl:col-span-full max-xl:border-t max-xl:border-l-0 max-xl:pt-4 max-xl:pl-0">
             {vulnerableCount ? <ShieldAlert size={24} className="shrink-0 text-error" /> : <ShieldQuestion size={24} className="shrink-0" />}
             <div><strong className="text-xs font-semibold">数はすべてアーカイブ以外のアプリ</strong>
-              <p className="mt-1 text-caption leading-[1.8] text-muted-foreground tabular-nums">アーカイブの{projects.length - activeCount}件は含みません。チェックしていないものは安全とは限りません。<br className="max-xl:hidden" />更新候補・Gitの状態は未確認です。用途・管理状態の整理がまだのもの{issues.triageCount}件。</p></div>
+              <p className="mt-1 text-caption leading-[1.8] text-muted-foreground tabular-nums">アーカイブの{projects.length - activeCount}件は含みません。診断対象外は、照会できる依存がないアプリです（lockなし・未対応の形式など）。チェックしていないものは安全とは限りません。<br className="max-xl:hidden" />更新候補・Gitの状態は未確認です。用途・管理状態の整理がまだのもの{issues.triageCount}件。</p></div>
           </div>
         </section>
         <section aria-label="アプリ一覧">

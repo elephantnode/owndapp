@@ -740,6 +740,7 @@ test('依存情報を読み、パッケージ名・版で横断検索し、読�
       const projects: Project[] = (await call('/projects')).data.projects;
       assert.equal(projects.find(p => p.id === web)!.dependencyStatus, 'complete');
       assert.equal(projects.find(p => p.id === gone)!.dependencyStatus, undefined);
+      assert.deepEqual([web, py, gone].map(id => projects.find(p => p.id === id)!.diagnosable), [true, false, undefined], 'diagnosable only with a dependency a check can send');
       let detail = (await call(`/projects/${web}/dependencies`)).data;
       assert.equal(detail.snapshot.direct, 1); assert.equal(detail.changed, false);
       // The project's lockfile changes: the detail says so, and reading again replaces the old rows.

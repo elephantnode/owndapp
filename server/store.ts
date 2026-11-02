@@ -343,6 +343,10 @@ export class Store {
     const rows = this.db.prepare('SELECT payload FROM dependency_snapshots').all() as { payload: string }[];
     return new Map(rows.map(row => { const snapshot = JSON.parse(row.payload) as DependencySnapshot; return [snapshot.projectId, snapshot]; }));
   }
+  /** One row per project and kind of dependency, enough to tell whether any of them could be sent to OSV. */
+  dependencyKinds(): { projectId: string; ecosystem: Ecosystem; source: Dependency['source']; version: string | null }[] {
+    return this.db.prepare('SELECT project_id AS projectId, ecosystem, source, MAX(version) AS version FROM dependencies GROUP BY project_id, ecosystem, source').all() as never;
+  }
   dependencies(projectId: string): { snapshot: DependencySnapshot | null; dependencies: Dependency[] } {
     this.project(projectId);
     const row = this.db.prepare('SELECT payload FROM dependency_snapshots WHERE project_id=?').get(projectId) as { payload: string } | undefined;

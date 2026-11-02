@@ -45,6 +45,8 @@ export interface Project extends Candidate {
   /** From the latest dependency snapshot, added on catalog reads. Absent when dependencies were never read. */
   dependencyStatus?: DependencyStatus;
   dependenciesReadAt?: string;
+  /** True when the latest dependency read found a dependency a vulnerability check can send. Absent when dependencies were never read. */
+  diagnosable?: boolean;
   /** Number of known dependency files whose format could not be inspected. */
   dependencyUnsupported?: number;
   /** From the latest git observation, added on catalog reads. Absent when git was never read. */

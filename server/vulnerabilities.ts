@@ -6,6 +6,10 @@ import type { Dependency, DependencyScope, DependencySnapshot, Ecosystem, Projec
 
 type Planned = { project: Project; contentId?: string; readAt: string; status: DependencySnapshot['status']; sendable: Dependency[]; notSent: Record<string, number> };
 
+/** Why a dependency stays local, or null when a check may send it. Also decides whether a project is diagnosable at all. */
+export const notSentReason = (d: Pick<Dependency, 'version' | 'ecosystem' | 'source'>) =>
+  !d.version ? 'no-version' : d.ecosystem === 'crates.io' && ['other-registry', 'registry-unrecorded', 'unknown'].includes(d.source) ? 'rust-source-unverified' : sendableSources.has(d.source) ? null : d.source;
+
 // Splits each project's recorded dependencies into what may be sent and what stays local, by reason.
 function plan(store: Store, ids: string[]) {
   const projects: Planned[] = []; const notRead: Project[] = [];
@@ -15,7 +19,7 @@ function plan(store: Store, ids: string[]) {
     if (!snapshot) { notRead.push(project); continue; }
     const notSent: Record<string, number> = {};
     const sendable = dependencies.filter(d => {
-      const reason = !d.version ? 'no-version' : d.ecosystem === 'crates.io' && ['other-registry', 'registry-unrecorded', 'unknown'].includes(d.source) ? 'rust-source-unverified' : sendableSources.has(d.source) ? null : d.source;
+      const reason = notSentReason(d);
       if (reason) notSent[reason] = (notSent[reason] || 0) + 1;
       return !reason;
     });
