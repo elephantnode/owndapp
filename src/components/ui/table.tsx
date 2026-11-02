@@ -24,7 +24,7 @@ function TableHead({ className, ...props }: React.ComponentProps<'th'>) {
 }
 
 function TableCell({ className, ...props }: React.ComponentProps<'td'>) {
-  return <td data-slot="table-cell" className={cn('px-4 py-6 align-middle group-hover/row:bg-row-hover', className)} {...props} />;
+  return <td data-slot="table-cell" className={cn('px-4 py-3 align-middle group-hover/row:bg-row-hover', className)} {...props} />;
 }
 
 export { Table, TableHeader, TableBody, TableRow, TableHead, TableCell };

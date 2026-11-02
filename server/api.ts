@@ -7,7 +7,7 @@ import { timingSafeEqual, randomBytes, randomUUID } from 'node:crypto';
 import { Store, CatalogError } from './store.js';
 import { canonicalRoot, isExcluded, within, revalidateCandidate } from './scanner.js';
 import { realpath, stat } from 'node:fs/promises';
-import { dependencyStatusOf, filesChanged, readDependencies as readLockfiles } from './dependencies.js';
+import { dependencyStatusOf, filesChanged, readDependencies as readLockfiles, unreadableFiles } from './dependencies.js';
 import { readGit } from './git.js';
 import { suggestPurpose } from './readme.js';
 import { osvApi, type OsvClient, type RunOptions } from './osv.js';
@@ -72,7 +72,7 @@ export function createApi(store: Store, port = 4310, pickFolder: FolderPicker = 
       const snapshot = snapshots.get(project.id); const check = checks.get(project.id); const observation = git.get(project.id);
       // Recompute so older catalogs that marked "lockなし" as partial stop counting as read failures.
       const dependencyStatus = snapshot ? dependencyStatusOf(snapshot.files) : undefined;
-      return { ...project, missing: flags[i], excluded: !!isExcluded(exclusions, project.path), dependencyStatus, dependencyUnsupported: snapshot?.files.filter(file => file.status === 'unsupported').length ?? 0, dependenciesReadAt: snapshot?.readAt,
+      return { ...project, missing: flags[i], excluded: !!isExcluded(exclusions, project.path), dependencyStatus, dependencyUnsupported: snapshot?.files.filter(file => file.status === 'unsupported').length ?? 0, dependencyUnreadable: snapshot ? unreadableFiles(snapshot.files).length : 0, dependenciesReadAt: snapshot?.readAt,
         diagnosable: snapshot ? diagnosable.has(project.id) : undefined,
         gitStatus: observation?.status, gitReadAt: observation?.readAt,
         gitRemoteCount: observation?.status === 'ok' ? observation.remotes.length : undefined,

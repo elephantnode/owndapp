@@ -162,6 +162,9 @@ export async function readDependencies(project: Pick<Project, 'path' | 'componen
   return { status: dependencyStatusOf(files), files, dependencies };
 }
 
+/** Files that should have been read but were not (invalid, unreadable, too large). An unsupported format is out of scope, not a failure. */
+export const unreadableFiles = (files: LockFileResult[]) => files.filter(f => !readFileStatuses.includes(f.status) && f.status !== 'no-lock' && f.status !== 'unsupported');
+
 /** Derives the project-level status from per-file results. Safe to re-run on older snapshots. */
 export function dependencyStatusOf(files: LockFileResult[]): DependencyStatus {
   const readCount = files.filter(f => readFileStatuses.includes(f.status)).length;

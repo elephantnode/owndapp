@@ -49,6 +49,8 @@ export interface Project extends Candidate {
   diagnosable?: boolean;
   /** Number of known dependency files whose format could not be inspected. */
   dependencyUnsupported?: number;
+  /** Number of dependency files in a supported format that could not be read (invalid, unreadable, too large). */
+  dependencyUnreadable?: number;
   /** From the latest git observation, added on catalog reads. Absent when git was never read. */
   gitStatus?: GitStatus;
   gitReadAt?: string;
@@ -193,7 +195,9 @@ export interface VulnerabilityCheck {
   findings: VulnerabilityFinding[];
 }
 /** Per project summary added on catalog reads. */
-export interface VulnerabilitySummary { checkedAt: string; status: VulnerabilityCheckStatus; count: number; highest: Severity | null; stale: boolean }
+export interface VulnerabilitySummary { checkedAt: string; status: VulnerabilityCheckStatus; count: number; highest: Severity | null; stale: boolean;
+  /** Some queries or advisory details failed. A partial check without this only left out files it could not read or does not support. */
+  queryFailed?: boolean }
 export interface ScanIssue { path: string; message: string }
 export interface Scan {
   /** DB-backed scans keep queues and results outside the summary payload. */
@@ -238,7 +242,8 @@ export interface ProjectEdit {
 
 /** Where a project runs. unknown is never treated as low risk. */
 export type Exposure = 'public' | 'internal' | 'local' | 'unknown';
-export const exposureLabels: Record<Exposure, string> = { public: '公開', internal: '社内', local: 'ローカルのみ', unknown: '不明' };
+// Personal projects too, so internal reads as 限定公開 (not company-only); stored keys are unchanged.
+export const exposureLabels: Record<Exposure, string> = { public: '一般公開', internal: '限定公開', local: 'ローカルのみ', unknown: '未設定' };
 
 /**
  * How a known vulnerability in a project is being handled. resolved is set only by a later check that no longer finds it;

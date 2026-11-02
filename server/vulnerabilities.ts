@@ -95,6 +95,7 @@ export async function check(store: Store, client: OsvClient, ids: string[],
         .map(advisory => continueIdentity(advisory, prior.get(key) ?? [], responded, matched, used));
       if (advisories.length) findings.push({ dependency, advisories, observedAt: now });
     }
+    // Any file left unread, unsupported formats included, keeps the check partial so it never resolves a finding.
     const status = failed || detailsMissing.size || dependencyStatus !== 'complete' ? 'partial' : 'complete';
     // Only a complete check clears anything. A partial one keeps every earlier advisory it did not see again: its query may have
     // failed, or a detail it could not fetch may have been needed to recognise it under another id.
@@ -176,5 +177,5 @@ export const advisoryCount = (check: VulnerabilityCheck) => new Set(check.findin
 
 export function summarize(check: VulnerabilityCheck, dependenciesReadAt: string | undefined, contentId?: string): VulnerabilitySummary {
   const highest = check.findings.flatMap(f => f.advisories.map(a => a.severity)).reduce<Severity | null>((a, b) => a ? higherSeverity(a, b) : b, null);
-  return { checkedAt: check.checkedAt, status: check.status, count: advisoryCount(check), highest, stale: check.snapshotContentId && contentId ? check.snapshotContentId !== contentId : dependenciesReadAt !== check.snapshotReadAt };
+  return { checkedAt: check.checkedAt, status: check.status, count: advisoryCount(check), highest, stale: check.snapshotContentId && contentId ? check.snapshotContentId !== contentId : dependenciesReadAt !== check.snapshotReadAt, queryFailed: check.failed > 0 || (check.detailsFailed ?? 0) > 0 };
 }

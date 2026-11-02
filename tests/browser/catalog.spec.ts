@@ -179,6 +179,8 @@ test('探索・追加・検索・編集・アーカイブ・復帰と狭い画�
   // A registered folder is moved away: the catalog flags it and removes it only after confirmation.
   renameSync(join(process.env.OWNDAPP_TEST_ROOT!, 'log-tool'), join(process.env.OWNDAPP_TEST_ROOT!, 'log-tool-moved'));
   await page.getByRole('link', { name: '登録したアプリ', exact: true }).click();
+  // Catalog-wide maintenance is kept in その他の操作 beside the filters.
+  await page.getByLabel('その他の操作').click();
   await page.getByRole('button', { name: '存在を再確認' }).click();
   await expect(page.getByRole('status').filter({ hasText: '見つからないアプリが1件' })).toBeVisible();
   await expect(page.getByText('フォルダが見つかりません', { exact: true })).toBeVisible();
@@ -343,7 +345,7 @@ test('探索・追加・検索・編集・アーカイブ・復帰と狭い画�
   // The catalog totals count projects outside the archive, in projects.
   const totals = page.getByRole('region', { name: '集計（アーカイブ以外）' });
   await expect(totals).toContainText('既知の脆弱性あり1アプリ');
-  await expect(totals).toContainText('アーカイブの0件は含みません');
+  await expect(totals).toContainText('アーカイブ0件を除く');
   // 脆弱性と対応: the queue is the main list. The found advisory is open work; exposure alone does not lower its priority, the status is recorded, a fix memo is ready.
   await page.getByRole('link', { name: '脆弱性と対応', exact: true }).click();
   await expect(page).toHaveURL(/#attention$/);
@@ -398,9 +400,8 @@ test('探索・追加・検索・編集・アーカイブ・復帰と狭い画�
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.getByRole('button', { name: 'アドバイザリごと' }).click();
   await expect(page.getByRole('list', { name: 'アドバイザリごとの影響' })).toContainText('1アプリ · @vue/shared');
-  // Untriaged projects are a small line under what is not checked yet, not a list of their own.
-  await expect(page.getByRole('main')).toContainText('整理（任意）: 用途が未入力');
-  await expect(page.getByRole('main')).toContainText('管理状態が未設定');
+  // Triage (purpose, lifecycle) is at most a button under what is not checked yet, never a list of its own.
+  await expect(page.getByRole('heading', { name: /整理|用途|管理状態/ })).toHaveCount(0);
   await page.evaluate(() => { (document.activeElement as HTMLElement)?.blur(); window.scrollTo(0, 0); });
   await page.screenshot({ path: 'docs/screenshots/attention.png', fullPage: true, animations: 'disabled' });
   // #queue, the former 対応キュー address, opens the same screen under #attention.
@@ -554,9 +555,11 @@ test('Swift未対応をlockなしや用途の未入力と混同しない', async
   await expect(row).toContainText('依存解析が未対応の形式です');
   // Counted apart from what a check can send, so it never sits in 未チェック.
   const totals = page.getByRole('region', { name: '集計（アーカイブ以外）' });
-  await expect(totals).toContainText(/診断対象外 [1-9]\d*件/);
+  await expect(totals).toContainText(/対象外 [1-9]\d*/);
   await page.getByRole('link', { name: '脆弱性と対応', exact: true }).click();
-  await expect(page.getByLabel('チェック範囲')).toContainText(/診断対象外[1-9]\d*件/);
+  // The same totals head every page.
+  await expect(totals).toContainText(/対象外 [1-9]\d*/);
+  await expect(page.getByRole('button', { name: /^診断対象外[1-9]\d*件を確認$/ })).toBeVisible();
   await page.goBack();
   await row.getByRole('link', { name: 'unhandled-swift', exact: true }).click();
   await expect(page.getByText('依存解析は未対応', { exact: true })).toBeVisible();
@@ -783,7 +786,8 @@ test('ホームで次の作業と取得失敗を区別し、使い方とフォ�
   } }));
   await page.goto('/#home');
   await expect(page.getByRole('heading', { name: '次にやること', exact: true, level: 1 })).toBeVisible();
-  await expect(page.getByRole('list', { name: '次にやること' })).toContainText('優先度 高 1件');
+  await expect(page.getByRole('list', { name: '次にやること' })).toContainText('未完了の対応 2アプリ');
+  await expect(page.getByRole('list', { name: '次にやること' })).toContainText('優先度 高 1アプリ · 要確認 1アプリ · ほか 0アプリ（脆弱性 2件）');
   await expect(page.getByRole('button', { name: '重大なものから対応する' })).toBeVisible();
   await page.screenshot({ path: 'docs/screenshots/home-maintenance.png', fullPage: true, animations: 'disabled' });
   fail = true;
@@ -928,7 +932,8 @@ test('RustのBrotliを部分名検索でき、未対応形式の範囲を表示�
   await page.getByRole('checkbox', { name: 'rust-brotli-demoを登録候補に選択' }).check();
   await page.getByRole('button', { name: '選択した候補を登録', exact: true }).click();
   const row = page.getByRole('row').filter({ has: page.getByRole('link', { name: 'rust-brotli-demo', exact: true }) });
-  await expect(row).toContainText('一部');
+  // Swift beside Rust is shown on the row, but is not a read failure to act on.
+  await expect(row).toContainText('一部は依存解析が未対応の形式です');
   await page.goto('/#dependencies');
   await page.getByLabel('パッケージ名', { exact: true }).fill('Brotli');
   await page.getByRole('button', { name: '検索', exact: true }).click();
@@ -988,6 +993,9 @@ test('検索範囲を絞り込み、ページ内で選択し、アーカイブ�
   await panel.getByLabel('アプリ名・パスで絞り込み', { exact: true }).fill('unsupported');
   await panel.getByLabel('読み取り状態', { exact: true }).selectOption('unsupported');
   await expect(panel.getByRole('link', { name: 'coverage-unsupported', exact: true })).toBeVisible();
+  // An unsupported format is not a read problem.
+  await panel.getByLabel('読み取り状態', { exact: true }).selectOption('problem');
+  await expect(panel.getByRole('link', { name: 'coverage-unsupported', exact: true })).toHaveCount(0);
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
   await page.screenshot({ path: 'docs/screenshots/dependency-coverage-narrow.png', fullPage: true, animations: 'disabled' });

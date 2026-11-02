@@ -136,7 +136,7 @@ test('選んだプロジェクトの公開・別レジストリの依存だけ�
     assert.deepEqual(sent.flat().sort(), ['lodash@4.17.15', 'lodash@4.17.21', 'minimist@1.2.0', 'semver@7.5.1'], 'a version without a resolved URL is sent as a registry package');
     assert.equal(await readFile(join(root, 'app/package-lock.json'), 'utf8'), lockBefore);
     const detail = (await call(`/projects/${app}/vulnerabilities`)).data;
-    assert.deepEqual(detail.summary, { checkedAt: detail.check.checkedAt, status: 'complete', count: 2, highest: 'critical', stale: false });
+    assert.deepEqual(detail.summary, { checkedAt: detail.check.checkedAt, status: 'complete', count: 2, highest: 'critical', stale: false, queryFailed: false });
     const lodash = detail.check.findings.find((f: any) => f.dependency.name === 'lodash');
     assert.deepEqual(lodash.advisories.map((a: any) => [a.id, a.fixed, a.severity]), [['GHSA-p6mc-m468-83gw', '4.17.19', 'high']], 'withdrawn advisories are left out');
     assert.equal(lodash.dependency.direct, true);
