@@ -20,7 +20,7 @@ owndappに関心を持っていただきありがとうございます。不具�
 
 ## 依存の取得と変更
 
-[npm依存管理の方針](docs/dependency-policy.md)に従います。要点は次のとおりです。
+[npm依存管理の方針](docs/reference/dependency-policy.md)に従います。要点は次のとおりです。
 
 - install時のライフサイクルスクリプトは`.npmrc`の`ignore-scripts=true`で無効にしています。`--ignore-scripts=false`や一括rebuildで迂回しないでください。
 - 既存のlockを再現するときは、次を1行ずつ実行し、結果を確認してから進めます。
@@ -45,22 +45,21 @@ npm run test:e2e
 
 - E2EテストはmacOSにインストール済みのGoogle Chromeを使います。
 - テストは一時フォルダに生成したサンプルと別のSQLiteを使います。**実際のプロジェクト・カタログ（`.owndapp/`）・認証情報を使ったテストや、それらの添付はしないでください。**
-- 詳細は[開発者向け資料](docs/development.md)を参照してください。
+- 詳細は[開発者向け資料](docs/reference/development.md)を参照してください。
 
 ## Windowsについて
 
 Windows対応はフォルダ選択とパス入力の試験的な実装で、**Windows実機での導入・起動・テストは未検証です。** 現在の確認はmacOS上での模擬テストに限られます。
 
-- 手順と未確認の項目は[Windowsで使う](docs/windows.md)を参照してください。
+- 手順と未確認の項目は[Windowsで使う](docs/reference/windows.md)を参照してください。
 - Windowsに関わる変更では、実機で確認したかどうか（確認した場合はWindowsとNode.jsの版）をプルリクエストに明記してください。実機で確認していない場合は「未検証」と書いてください。
 
 ## ドキュメントの置き場所
 
 | 内容 | 置き場所 |
 | --- | --- |
-| 利用者向けの概要・導入・使い方 | [README.md](README.md)、`docs/getting-started.md`・`docs/usage.md`など |
-| 実装済み機能と対応範囲 | [docs/features.md](docs/features.md) |
-| 未対応・今後の課題 | [docs/roadmap.md](docs/roadmap.md) |
-| 開発・検証の手順と設計の経緯 | [docs/development.md](docs/development.md) |
+| 利用者向けの概要と使い方 | [README.md](README.md)、[docs/manual/](docs/manual/README.md) |
+| 現在の仕様・対応範囲・運用・検証（開発者・AI向け） | [docs/reference/](docs/reference/)（入口は[features.md](docs/reference/features.md)と[development.md](docs/reference/development.md)） |
+| 過去の計画・リリースの記録、今後の課題 | [docs/design/](docs/design/)（課題は[roadmap.md](docs/design/roadmap.md)） |
 
-READMEは利用者向けに保ち、実装の詳細は上記の各資料へ書いてください。機能を変更した場合は、対応する資料も更新してください。
+マニュアルとREADMEは、利用者の操作や画面が変わったときだけ更新し、細かい条件や上限は書かずにリファレンスへリンクしてください。機能を変更したときは、リファレンスを更新してください。

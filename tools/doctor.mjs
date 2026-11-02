@@ -39,7 +39,7 @@ export async function inspectRuntime({ root = fileURLToPath(new URL('..', import
     const missing = packages.filter((_, i) => !present[i]);
     const runner = await exists(join(root, 'node_modules', 'tsx', 'dist', 'cli.mjs'));
     add(!missing.length && runner, missing.length || !runner
-      ? `依存が未導入または不足しています${missing.length ? `（${missing.join('、')}）` : '（tsx）'}。docs/dependency-policy.mdを確認し、検査済みlockから npm ci --ignore-scripts --include=dev で準備してください。--omit=devは使わないでください`
+      ? `依存が未導入または不足しています${missing.length ? `（${missing.join('、')}）` : '（tsx）'}。docs/reference/dependency-policy.mdを確認し、検査済みlockから npm ci --ignore-scripts --include=dev で準備してください。--omit=devは使わないでください`
       : '依存ファイル：存在を確認（脆弱性・署名・内容の検査は別途必要）');
   }
   if (!development) add(await exists(join(root, 'dist', 'index.html')),
@@ -61,7 +61,7 @@ export async function runDoctor(args = process.argv.slice(2)) {
   const checks = await inspectRuntime({ development: args.includes('--development') });
   for (const check of checks) console.log(`${check.ok ? '[確認]' : '[要対応]'} ${check.message}`);
   if (checks.some(check => !check.ok)) { console.error('準備が整っていません。上の案内を確認してください。記録は変更していません。'); return 1; }
-  console.log('起動の準備を確認しました。停止・更新・復元は docs/operations.md を参照してください。');
+  console.log('起動の準備を確認しました。使い方は docs/manual/、停止・更新・復元は docs/reference/operations.md を参照してください。');
   return 0;
 }
 const invokedPath = process.argv[1] ? await realpath(resolve(process.argv[1])).catch(() => null) : null;

@@ -35,4 +35,15 @@ macOS / Apple Silicon、Node.js 24で、単体・API 204件、型検査・本番
 
 ## スクリーンショット
 
-[画面一覧](screenshots/README.md)は生成サンプルを用いた検証画面です。古い画面には当時のメニューや実装状態が含まれます。現在の機能は[実装済み機能](features.md)を参照してください。
+[画面一覧](../screenshots/README.md)は生成サンプルを用いた検証画面です。古い画面には当時のメニューや実装状態が含まれます。現在の機能は[実装済み機能](features.md)を参照してください。
+
+## osv-scanner の併用（2026-11-03）
+
+macOS / Apple Silicon、Node.js 24、osv-scanner 2.7.0、Docker 29.9 で確認した。
+
+- 単体・API 240件、型検査・本番ビルド、Chromeのブラウザ操作22件が成功。osv-scanner と docker の実行は差し替えたうえで、渡す引数（`fix`・`--serve`・呼び出し解析・pull を使わないこと）、終了コード（0・1・128・その他）、フォルダ外を指すファイルの拒否、一時ファイルの削除を検証した。
+- 実際の osv-scanner で、生成した `pubspec.lock`・`Package.resolved`（隣に `Package.swift`）・`packages.lock.json` を照会し、Pub・SwiftURL・NuGet の既知の脆弱性と修正版が由来付きで取り込まれ、照会結果が「完了」になることを確認した。
+- 実際の docker で、手元にあった `busybox:latest` を書き出して照会し、イメージIDの記録と一時ファイルの削除を確認した。busybox にはパッケージの記録がないため、イメージ内のパッケージから脆弱性が見つかる場合は実機で確認していない（差し替えた出力で検証）。
+- osv-scanner 2.7.0 は `-L 形式名:パス` を `pubspec.lock`・`gradle.lockfile`・`packages.lock.json`・`packages.config`・`bun.lock`・`mix.lock` で受け付け、`Package.resolved`・`*.csproj` では受け付けないことを確認した（後者はパスをそのまま渡し、`:` を含むパスは照会しない）。`Package.swift`・`build.gradle`・`deno.lock`・`go.work` は osv-scanner でも読めない。
+- Windows実機、実際のプロジェクトでの確認はしていない。
+

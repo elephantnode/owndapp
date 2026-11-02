@@ -15,12 +15,12 @@ owndappは、ローカルの開発プロジェクトを見つけて登録し、�
 
 ## 対応状況
 
-macOS / Apple Siliconで導入と操作を検証しています。Windowsはフォルダ選択・パス入力・対応するエディタ/ターミナルの登録と起動を実装した試験的対応です。Windows実機での導入・標準ダイアログ・権限・再起動などの受け入れ確認は未完了です。詳細は[Windows手順](windows.md)を参照してください。
+macOS / Apple Siliconで導入と操作を検証しています。Windowsはフォルダ選択・パス入力・対応するエディタ/ターミナルの登録と起動を実装した試験的対応です。Windows実機での導入・標準ダイアログ・権限・再起動などの受け入れ確認は未完了です。詳細は[Windows手順](../reference/windows.md)を参照してください。
 
 未対応形式や読み取っていない構成、実際のデプロイ済み版、未知の脆弱性までは判定しません。自動的なパッケージ更新やクラウド操作は行いません。
 
 ## 入手と使い方
 
-[README](../README.md)、[導入](getting-started.md)、[Windows手順](windows.md)を参照してください。
+[README](../../README.md)、[導入](../reference/getting-started.md)、[Windows手順](../reference/windows.md)を参照してください。
 
-MIT License。問題の報告は[貢献ガイド](../CONTRIBUTING.md)、セキュリティ上の問題は[SECURITY](../SECURITY.md)を参照してください。
+MIT License。問題の報告は[貢献ガイド](../../CONTRIBUTING.md)、セキュリティ上の問題は[SECURITY](../../SECURITY.md)を参照してください。

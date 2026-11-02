@@ -33,6 +33,9 @@ A→B→Cの順で作る。対象を発見できることと、詳細診断に�
 | GO-01 | `go.mod` / `go.work` / `go.sum` | Goモジュールとworkspace候補 | module、go/toolchain、require/replace、workspaceの静的参照 | requireは宣言、go.sumは検証用の記録。実際に選択された全モジュールと断定しない [S5] |
 | RS-01 | `Cargo.toml` / `Cargo.lock` / `rust-toolchain.toml` | Rust候補、名前、workspace | Rust指定と依存指定、lockのパッケージ名・版・sourceを取得 | 初版はパッケージ一覧まで。features・targetごとの到達可能性は不明。lockの形式対応は実装時のfixtureで明示 [S6] |
 | OTHER-01 | `Gemfile` / `pom.xml` / `build.gradle*` / `*.csproj` / `Package.swift` | ファイル名から技術候補 | ファイルの存在のみ | 名前の静的取得・依存解析は後続。ユーザーが手動登録・訂正できる |
+| APP-01 | `*.xcodeproj` / `*.xcworkspace` / `Podfile` | Xcode・CocoaPodsの候補。Xcodeのフォルダは境界として配下をまとめる | フォルダ・ファイルの存在のみ | ビルド・`pod install` はしない。Swiftのソース解析はしない |
+| EXT-01 | `manifest.json` | `manifest_version` があればChrome拡張、`id`と`minAppVersion`があればObsidianプラグイン、`api_version`と`templates/`があればZendeskテーマ | 種類の判定に使うキーのみ | ほかの`manifest.json`（Webアプリのmanifestなど）は候補にしない |
+| FW-01 | `package.json` / `requirements*.txt` / `pyproject.toml` / `Gemfile` | 依存宣言から Electron・Tauri・Remotion・Vite・Express・Hono・Expo・React Native・SST・Django・Flask・FastAPI・Rails の構成ラベル | 宣言の有無のみ | 版の解決や実行はしない |
 
 Vue・Next.jsなどは直接依存の宣言や対応lockを根拠としてラベル付けする。設定ファイル名だけを根拠とする場合は「候補」と表示する。Reactを使うだけでNext.jsとは判定しない。
 
@@ -53,10 +56,11 @@ JS-02の形式1はworkspace情報が不足する場合がある。lockの読み�
 | ID | 根拠 | 初版で扱う情報 | 扱わない情報 |
 | --- | --- | --- | --- |
 | ENV-01 | `Dockerfile*` / `compose.yaml` / `compose.yml` / `docker-compose*.yml` / `docker-compose*.yaml` | Docker設定あり。静的なFROM・image・サービス名と根拠 | ビルド、pull、コンテナ起動・照会。imageタグから内部言語版を断定しない |
-| CLOUD-01 | SAM/CloudFormationのYAML・JSON、`samconfig.toml` | `template.yaml` 等の resource type / Transform、`samconfig.toml` とそれが指すテンプレートから Lambda・SAM 候補 | stack実在、環境変数の値、認証情報、デプロイ済み版。Globalsによる継承は解釈できる範囲だけ [S7] |
+| CLOUD-01 | SAM/CloudFormationのYAML・JSON（`template.*`、`sam-template.*`、`template-*`、`*.template.*`、`cloudformation*`）、`samconfig.toml` | `template.yaml` 等の resource type / Transform、`samconfig.toml` とそれが指すテンプレートから Lambda・SAM 候補 | stack実在、環境変数の値、認証情報、デプロイ済み版。Globalsによる継承は解釈できる範囲だけ [S7] |
 | CLOUD-02 | `serverless.yml` / `serverless.yaml` / `serverless.json` / `serverless.ts` | Serverless設定あり。YAML/JSONは静的provider名のみ抽出 | 変数解決、プラグイン実行、TSの評価、関数実在 |
 | CLOUD-03 | `cdk.json` / `Pulumi.yaml` / `Pulumi.yml` / `*.tf` / `*.tf.json` | IaCの種類と根拠パス | CDK synth、Pulumi実行、Terraform実行・state読取。CDKがあるだけでLambdaとは判定しない [S8] |
 | CLOUD-04 | `vercel.json` / `netlify.toml` / `wrangler.toml` / `wrangler.json*` / `firebase.json` / `supabase/config.toml` | 配置・サービス設定の候補と根拠パス | サービスへの接続・ログイン・資源照会 |
+| CLOUD-05 | `amplify.yml` / `amplify/backend.ts`・`cli.json`・`team-provider-info.json` / `sst.config.*` / `.chalice/` | Amplify・SST・Chaliceの候補と根拠パス | 設定の評価、環境への接続 |
 
 一般的な`template.yaml`だけでAWSと判定せず、内容の型宣言などを検証する。補間式、参照、条件分岐を解決できない場合は「動的指定」とする。設定がないことから「クラウド未使用」とも判定しない。
 

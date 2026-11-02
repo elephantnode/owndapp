@@ -9,7 +9,7 @@ body:
 
         - **セキュリティ上の問題（脆弱性）はここに書かないでください。** [SECURITY.md](https://github.com/elephantnode/owndapp/security/policy)の手順で報告してください。
         - 依存パッケージの自動更新・自動修正や、登録したアプリのソースを自動で変更する機能は対象範囲外です。
-        - 既存の課題は[開発課題](https://github.com/elephantnode/owndapp/blob/main/docs/roadmap.md)も確認してください。
+        - 既存の課題は[開発課題](https://github.com/elephantnode/owndapp/blob/main/docs/design/roadmap.md)も確認してください。
         - 実際のプロジェクトのパス・DB・`.env`・認証情報・個人情報は書かないでください。
 
   - type: textarea

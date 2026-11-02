@@ -1,6 +1,11 @@
 # owndapp development instructions
 
-Read README.md and CONTRIBUTING.md before making changes. Follow docs/dependency-policy.md for dependency changes. User-facing documentation belongs in README.md and docs/usage.md; implementation details, limitations and verification belong under docs/.
+Read README.md and CONTRIBUTING.md before making changes. Follow docs/reference/dependency-policy.md for dependency changes.
+
+Documentation has three audiences; keep them apart:
+- docs/manual/ and README.md are for people using owndapp. Task-based steps, about one screen per page, words that match the UI. Change them only when what a user does or sees changes, and never add conditions, limits or edge cases there; link to the reference instead. The in-app guide (src/UsageGuide.tsx) is a summary of the manual.
+- docs/reference/ is for developers and AI agents: current behavior, detection and check rules, limits, data model, operations and verification. Update it whenever behavior changes.
+- docs/design/ keeps past plans and release records as written. Do not rewrite history there; record new decisions in the reference instead.
 
 - Keep install lifecycle scripts disabled. Do not use npm audit fix --force.
 - Use generated fixtures and a separate catalog for testing. Never inspect or send a contributor's real project data without explicit authorization.
