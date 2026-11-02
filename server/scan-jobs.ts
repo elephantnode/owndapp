@@ -225,6 +225,12 @@ export class ScanJobs {
     return withRegistration(candidate, row);
   }
 
+  /** Candidates at paths that are already registered, read in full. */
+  registeredCandidates(scanId: string): Candidate[] {
+    const ids = this.db.prepare('SELECT c.id FROM scan_job_candidates c WHERE c.scan_id=? AND EXISTS (SELECT 1 FROM projects p WHERE p.path = c.path)').all(scanId) as { id: string }[];
+    return ids.map(row => this.candidate(scanId, row.id)).filter((c): c is Candidate => !!c && !c.incomplete);
+  }
+
   /** Ids of the candidates matching the filters, in page order, for selecting all of them at once. */
   selectIds(scanId: string, options: ScanSelectOptions): string[] {
     const { query, filter, exclusions } = pageOptions(options);

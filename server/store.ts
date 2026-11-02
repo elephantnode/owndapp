@@ -144,6 +144,27 @@ export class Store {
       this.db.exec('COMMIT'); return result;
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
+  /**
+   * Brings registered projects up to date with what a finished scan found at the same paths: technologies, components, evidence and fingerprint.
+   * What the user entered (name, purpose, tags, notes, lifecycle, exposure) is kept, and the revision is not bumped so an open edit still saves.
+   */
+  refreshStructure(candidates: Candidate[]) {
+    const byPath = new Map(candidates.filter(c => !c.incomplete).map(c => [c.path, c]));
+    if (!byPath.size) return 0;
+    let changed = 0;
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      for (const project of this.projects()) {
+        const found = byPath.get(project.path);
+        if (!found || found.fingerprint === project.fingerprint && found.technologies.join('\n') === project.technologies.join('\n')) continue;
+        const next: Project = { ...project, technologies: found.technologies, components: found.components, evidence: found.evidence, fingerprint: found.fingerprint, observedAt: new Date().toISOString() };
+        this.db.prepare('UPDATE projects SET payload=? WHERE id=?').run(JSON.stringify(next), project.id);
+        this.history(project.id, 'structure_refreshed', { from: project.technologies, to: found.technologies });
+        changed++;
+      }
+      this.db.exec('COMMIT'); return changed;
+    } catch (error) { this.db.exec('ROLLBACK'); throw error; }
+  }
   edit(id: string, input: ProjectEdit) {
     const current = this.project(id);
     if (input.revision !== current.revision) throw new CatalogError('別の画面で変更されています。入力を残したまま最新の内容を読み直してください', 409);

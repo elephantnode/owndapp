@@ -494,7 +494,11 @@ export function createApi(store: Store, port = 4310, pickFolder: FolderPicker = 
   const findScan = (id: string) => jobs.get(id, { limit: 0, exclusions: store.exclusions() }) ?? store.scan(id);
   const launchScan = (id: string) => {
     const controller = new AbortController(); controllers.set(id, controller);
-    const task = jobs.run(id, controller.signal).finally(() => { controllers.delete(id); scanTasks.delete(id); });
+    const task = jobs.run(id, controller.signal).then(() => {
+      // A finished scan also refreshes what registered projects are made of, so improved detection reaches them.
+      const scan = jobs.get(id, { limit: 0 });
+      if (scan && (scan.status === 'completed' || scan.status === 'partial')) store.refreshStructure(jobs.registeredCandidates(id));
+    }).finally(() => { controllers.delete(id); scanTasks.delete(id); });
     scanTasks.set(id, task); void task.catch(() => {});
   };
   const requireStopped = () => {
