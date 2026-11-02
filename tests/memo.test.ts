@@ -19,7 +19,7 @@ test('対策メモは未解消のものだけをパッケージの版ごとに�
     item('GHSA-e', 'high', '2.0.0', [dep('old', '1.0.0', true)], { status: 'resolved' }),
   ], '2026-10-20T05:00:00Z');
   assert.match(memo, /^# 脆弱性の対策メモ: invoice-app/);
-  assert.match(memo, /公開状況: 公開 \/ 管理状態: 運用中/);
+  assert.match(memo, /公開状況: 一般公開 \/ 管理状態: 運用中/);
   assert.match(memo, /対応が必要なもの: 3件（3種類のアドバイザリ、2個のパッケージの版）/);
   // lodash: both advisories under one heading, target the highest fixed version.
   assert.match(memo, /## lodash@4\.17\.15（直接依存・本番・`package-lock\.json`）/);
@@ -35,7 +35,7 @@ test('対策メモは未解消のものだけをパッケージの版ごとに�
 
 test('対応が必要なものがないときもメモを作れる', () => {
   const memo = buildMemo({ ...project, exposure: undefined }, [], null);
-  assert.match(memo, /公開状況: 不明/);
+  assert.match(memo, /公開状況: 未設定/);
   assert.match(memo, /照会: 未照会/);
   assert.match(memo, /対応が必要な既知の脆弱性はありません/);
 });

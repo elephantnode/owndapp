@@ -26,7 +26,7 @@ import { allPaths, buildTree, withinPath, type TreeNode } from './catalog-tree';
 import { buildMemo } from './memo';
 import { priorityRank, severityRank, compareQueueItems } from '../shared/priority';
 import { groupFindings, severityCounts, type FindingGroup } from './findings';
-import { groupIssues, hasIssue, issueKinds, needsTriage, type IssueKind } from './attention';
+import { diagnosable, groupIssues, hasIssue, issueKinds, needsRecheck, needsTriage, outOfScope, unreadable, type IssueKind } from './attention';
 
 type View = 'home' | 'attention' | 'catalog' | 'dependencies' | 'discover' | 'archive' | 'settings';
 const navItems = [
@@ -37,9 +37,11 @@ const navItems = [
   { id: 'dependencies', label: '依存検索', icon: PackageSearch },
   { id: 'settings', label: '設定・使い方', icon: Settings },
 ] as const;
+// すべて is the catalog with archived projects included, so archive has one switch instead of a tab and a checkbox.
 const projectTabs = [
-  { id: 'catalog', label: '利用中', icon: LayoutList },
-  { id: 'archive', label: 'アーカイブ', icon: Archive },
+  { id: 'catalog', label: '利用中', icon: LayoutList, all: false },
+  { id: 'archive', label: 'アーカイブ', icon: Archive, all: false },
+  { id: 'catalog', label: 'すべて', icon: Layers, all: true },
 ] as const;
 const views: View[] = ['home', 'attention', 'catalog', 'dependencies', 'discover', 'archive', 'settings'];
 const inProjects = (view: View) => projectTabs.some(tab => tab.id === view);
@@ -124,15 +126,16 @@ function ProjectStatus({ project }: { project: Project }) {
   </> : project.excluded ? <>
     <div className="flex items-center gap-1.5 text-warning"><EyeOff size={14} className="shrink-0" />除外設定のフォルダにあります</div>
     <span className="mt-1 block text-micro text-muted-foreground">カタログから外せます</span>
-  </> : project.vulnerabilities && (project.vulnerabilities.count || project.vulnerabilities.stale) ? <VulnerabilityLine summary={project.vulnerabilities} /> : project.dependencyStatus === 'failed' || project.dependencyStatus === 'partial' ? <>
-    <div className="flex items-center gap-1.5 text-warning"><ShieldQuestion size={14} className="shrink-0" />{project.dependencyUnsupported && project.dependencyStatus === 'failed' ? '依存解析は未対応' : project.dependencyStatus === 'partial' ? '依存の一部が未確認' : '依存を読み取れません'}</div>
+  </> : project.vulnerabilities && (project.vulnerabilities.count || project.vulnerabilities.stale) ? <VulnerabilityLine summary={project.vulnerabilities} /> : project.dependencyStatus === 'partial' && unreadable(project) ? <>
+    <div className="flex items-center gap-1.5 text-warning"><ShieldQuestion size={14} className="shrink-0" />依存の一部を読み取れません</div>
     <span className="mt-1 block text-micro text-muted-foreground">詳細で読み取れない形式・ファイルを確認できます</span>
-  </> : project.dependencyStatus === 'no-lock' ? <>
-    <div className="flex items-center gap-1.5 text-warning"><ShieldQuestion size={14} className="shrink-0" />依存を判定できません</div>
-    <span className="mt-1 block text-micro text-muted-foreground">lockなし・検査未対応の形式。詳細で理由を確認できます</span>
+  </> : project.diagnosable === false ? <>
+    {/* Unreadable files are a problem to fix; the other reasons are simply outside what a check covers. */}
+    <div className={cn('flex items-center gap-1.5', unreadable(project) ? 'text-warning' : 'text-muted-foreground')}><ShieldQuestion size={14} className="shrink-0" />診断対象外</div>
+    <span className="mt-1 block text-micro text-muted-foreground">{project.dependencyStatus === 'no-lock' ? 'lockファイルがありません' : project.dependencyStatus === 'failed' ? unreadable(project) ? '依存を読み取れません。詳細で確認できます' : '依存解析が未対応の形式です' : '依存がないか、Git・ローカル参照など照会できない依存だけです'}</span>
   </> : <>
     <div className={cn('flex items-center gap-1.5', needsAttention(project) ? 'text-warning' : 'text-muted-foreground')}><CircleAlert size={14} className="shrink-0" />{project.lifecycle === 'untriaged' ? '用途・状態を整理' : !project.purpose ? '用途が未入力' : project.vulnerabilities ? '既知の脆弱性は見つかっていません' : '脆弱性は未照会'}</div>
-    <span className="mt-1 block text-micro text-muted-foreground">{project.evidence.some(e => e.detail.includes('失敗')) ? '構成の一部を読み取れません' : project.vulnerabilities ? `${date(project.vulnerabilities.checkedAt)}時点` : project.dependencyStatus ? '依存は読み取り済み' : '依存・脆弱性は未確認'}</span>
+    <span className="mt-1 block text-micro text-muted-foreground">{project.evidence.some(e => e.detail.includes('失敗')) ? '構成の一部を読み取れません' : project.dependencyStatus === 'partial' ? '一部は依存解析が未対応の形式です' : project.vulnerabilities ? `${date(project.vulnerabilities.checkedAt)}時点` : project.dependencyStatus ? '依存は読み取り済み' : '依存・脆弱性は未確認'}</span>
   </>;
 }
 
@@ -155,16 +158,16 @@ const decodeQueue = (d: QueueWire): QueueData => ({ projects: d.projects, items:
 // The stored statuses stay as they are. On screen they read as four stages, with not-applicable under その他.
 type Stage = 'open' | 'working' | 'awaiting' | 'done' | 'other';
 const stageOf: Record<ResponseStatus, Stage> = { open: 'open', investigating: 'working', fixing: 'working', 'awaiting-recheck': 'awaiting', resolved: 'done', 'not-applicable': 'other' };
-const stageLabels: Record<Stage, string> = { open: '未対応', working: '対応中', awaiting: '確認待ち', done: '完了', other: 'その他' };
 const statusDisplay: Record<ResponseStatus, string> = { open: '未対応', investigating: '対応中（調査中）', fixing: '対応中', 'awaiting-recheck': '確認待ち', resolved: '完了', 'not-applicable': '対象外' };
 const unfinished: Stage[] = ['open', 'working', 'awaiting'];
+// Shown as tabs with their counts, so the counts and the status filter are one control.
 const statusGroups: Record<string, { label: string; stages: Stage[] }> = {
-  active: { label: '未完了（未対応・対応中・確認待ち）', stages: unfinished },
+  active: { label: '未完了', stages: unfinished },
   open: { label: '未対応', stages: ['open'] },
-  working: { label: '対応中（調査中を含む）', stages: ['working'] },
+  working: { label: '対応中', stages: ['working'] },
   awaiting: { label: '確認待ち', stages: ['awaiting'] },
   done: { label: '完了', stages: ['done'] },
-  other: { label: 'その他（対象外）', stages: ['other'] },
+  other: { label: '対象外', stages: ['other'] },
   all: { label: 'すべて', stages: ['open', 'working', 'awaiting', 'done', 'other'] },
 };
 const statusTone: Record<ResponseStatus, string> = { open: 'text-warning', investigating: 'text-brand', fixing: 'text-brand', 'awaiting-recheck': 'text-dim', 'not-applicable': 'text-muted-foreground', resolved: 'text-success' };
@@ -235,8 +238,7 @@ function QueueView({ projects, reloadProjects, notify, check, apps, open: openIn
     {item.advisory.summary && <span className="ml-2 text-dim">{item.advisory.summary}</span>}</p>;
   return <section aria-labelledby="queue-title" className="mb-12 max-md:mb-10">
     <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
-      <div><h2 id="queue-title" className="text-base font-semibold">既知の脆弱性への対応</h2>
-        <p className="mt-1 max-w-[720px] text-caption text-muted-foreground">優先度の高いものから、対応状況を記録して進めます。完了は再チェックで検出されなくなったときに付きます。</p></div>
+      <h2 id="queue-title" className="text-base font-semibold">既知の脆弱性への対応</h2>
       <div className="flex flex-wrap gap-2">
         {recheckIds.length > 0 && <Button size="sm" title="未完了のものがあるアプリを、もう一度OSVに照会します。送る内容は照会の前に確認できます" onClick={() => check(recheckIds)}><ShieldAlert size={15} />{recheckIds.length}件を再チェック</Button>}
         {!editor && data && data.items.length > 0 && <Button size="sm" variant="ghost" className="text-dim" onClick={openSettings}><SquareCode size={15} />エディタを設定</Button>}
@@ -246,23 +248,22 @@ function QueueView({ projects, reloadProjects, notify, check, apps, open: openIn
     {!data ? <p className="border-y py-6 text-caption text-muted-foreground">読み込んでいます</p> : !data.items.length ? <div className="flex items-start gap-3 border-y py-6">
       <ShieldQuestion size={22} className="shrink-0 text-muted-foreground" />
       <div><p className="text-sm font-semibold">対応する既知の脆弱性はまだありません</p>
-        <p className="mt-1 text-caption text-muted-foreground">チェックで見つかったものがここに並びます。チェックしていないアプリは含みません。{hasUnchecked ? '下の「まだ確認していないもの」からチェックできます。' : ''}</p></div></div> : <>
-      <div className="mb-6 flex flex-wrap gap-x-6 gap-y-2 border-y py-4 text-xs tabular-nums">
-        {(Object.keys(stageLabels) as Stage[]).map(stage => <span key={stage}><span className={stage === 'open' ? 'text-warning' : stage === 'working' ? 'text-brand' : stage === 'done' ? 'text-success' : 'text-muted-foreground'}>{stageLabels[stage]}</span> <strong className="font-semibold">{counts.get(stage) ?? 0}件</strong>
-          {stage === 'working' && investigating > 0 && <span className="ml-1 text-muted-foreground">（調査中{investigating}）</span>}{stage === 'other' && <span className="ml-1 text-muted-foreground">（対象外）</span>}</span>)}
-        <span className="text-muted-foreground max-md:basis-full">チェック済み{Object.keys(data.projects).length}件のアプリ。チェックしていないものは含みません。</span>
+        <p className="mt-1 text-caption text-muted-foreground">チェックで見つかったものがここに並びます。{hasUnchecked ? '下からチェックできます。' : ''}</p></div></div> : <>
+      <div role="group" aria-label="対応状況で絞り込み" className="mb-4 flex flex-wrap gap-1 border-y py-2 text-xs tabular-nums">
+        {Object.entries(statusGroups).map(([key, g]) => { const n = g.stages.reduce((sum, stage) => sum + (counts.get(stage) ?? 0), 0);
+          return <Button key={key} variant="ghost" size="sm" aria-pressed={group === key} className="aria-pressed:bg-brand-subtle aria-pressed:font-semibold aria-pressed:text-brand" onClick={() => setGroup(key)}>
+            {g.label} {n}件{key === 'working' && investigating > 0 && <span className="text-muted-foreground">（調査中{investigating}）</span>}</Button>; })}
       </div>
-      <div className="mb-4 flex flex-wrap items-center gap-3 max-md:gap-2">
-        <NativeSelect size="sm" aria-label="対応状況で絞り込み" value={group} onChange={e => setGroup(e.target.value)}>{Object.entries(statusGroups).map(([key, g]) => <NativeSelectOption key={key} value={key}>{g.label}</NativeSelectOption>)}</NativeSelect>
-        <NativeSelect size="sm" aria-label="優先度で絞り込み" value={priority} onChange={e => setPriority(e.target.value)}><NativeSelectOption value="">すべての優先度</NativeSelectOption>{Object.entries(priorityLabels).map(([key, label]) => <NativeSelectOption key={key} value={key}>優先度 {label}</NativeSelectOption>)}</NativeSelect>
-        <NativeSelect size="sm" aria-label="公開状況で絞り込み" value={exposure} onChange={e => setExposure(e.target.value)}><NativeSelectOption value="">すべての公開状況</NativeSelectOption>{Object.entries(exposureLabels).map(([key, label]) => <NativeSelectOption key={key} value={key}>{label}</NativeSelectOption>)}</NativeSelect>
+      <div className="mb-4 flex flex-wrap items-center gap-2">
         <SearchBox label="対応項目を検索" className="w-[260px] max-md:w-full"><Search size={16} className="shrink-0" /><Input className={searchInput} value={query} onChange={e => setQuery(e.target.value)} placeholder="アプリ・パッケージ・ID" /></SearchBox>
-        <div role="group" aria-label="まとめ方" className="ml-auto flex items-center gap-1">
+        <NativeSelect size="sm" aria-label="優先度で絞り込み" value={priority} onChange={e => setPriority(e.target.value)}><NativeSelectOption value="">優先度</NativeSelectOption>{Object.entries(priorityLabels).map(([key, label]) => <NativeSelectOption key={key} value={key}>優先度 {label}</NativeSelectOption>)}</NativeSelect>
+        <NativeSelect size="sm" aria-label="公開状況で絞り込み" value={exposure} onChange={e => setExposure(e.target.value)}><NativeSelectOption value="">公開状況</NativeSelectOption>{Object.entries(exposureLabels).map(([key, label]) => <NativeSelectOption key={key} value={key}>{label}</NativeSelectOption>)}</NativeSelect>
+        <span className="ml-auto text-xs text-muted-foreground tabular-nums">{items.length.toLocaleString()}件（{groups.length}{mode === 'project' ? 'アプリ' : '種類'}）</span>
+        <div role="group" aria-label="まとめ方" className="flex items-center gap-1">
           <Button variant="ghost" size="sm" aria-pressed={mode === 'project'} className="aria-pressed:border-border aria-pressed:bg-accent" onClick={() => setMode('project')}>アプリごと</Button>
           <Button variant="ghost" size="sm" aria-pressed={mode === 'advisory'} className="aria-pressed:border-border aria-pressed:bg-accent" onClick={() => setMode('advisory')}>アドバイザリごと</Button>
         </div>
       </div>
-      <p className="mb-3 text-caption text-muted-foreground tabular-nums">{items.length.toLocaleString()}件（{groups.length}{mode === 'project' ? 'アプリ' : '種類のアドバイザリ'}）。緊急・高は優先度「高」、重大度不明は「要確認」です。公開状況や管理状態だけでは引き下げません。</p>
       {selected.size > 0 && <div className="mb-3 flex flex-wrap items-center gap-3 bg-brand-subtle px-4 py-3 text-xs"><span className="tabular-nums">{selected.size}件を選択中</span>
         <Button size="sm" onClick={() => setChanging(true)}><ListChecks size={16} />対応状況を変更</Button><Button size="sm" onClick={() => setSelected(new Set())}>選択解除</Button></div>}
       {groups.length ? <ul aria-label={mode === 'project' ? 'アプリごとの脆弱性' : 'アドバイザリごとの影響'} className="m-0 list-none border-t p-0">{groups.slice(0, limit).map(([key, list]) => {
@@ -379,7 +380,10 @@ const issueText: Record<IssueKind, { title: string; text: string }> = {
 
 // One check accepts this many projects, as the API does.
 const checkLimit = 1000;
-const freshness = (p: Project) => !p.vulnerabilities ? 0 : p.vulnerabilities.stale || p.vulnerabilities.status === 'partial' ? 1 : 2;
+const freshness = (p: Project) => !p.vulnerabilities ? 0 : needsRecheck(p) ? 1 : 2;
+// Every monitored project, those never checked or out of date first, within what one check accepts.
+const checkAllLabel = (count: number) => count > checkLimit ? `診断可能のうち${checkLimit}件をチェック` : `診断可能${count}件をチェック`;
+const monitoredCheckIds = (monitored: Project[]) => [...monitored].sort((a, b) => freshness(a) - freshness(b) || (a.vulnerabilities?.checkedAt ?? '').localeCompare(b.vulnerabilities?.checkedAt ?? '')).slice(0, checkLimit).map(p => p.id);
 
 // 対応する: the response queue first, then the other problems by kind, then what has not been checked yet.
 // Known vulnerabilities are listed once, in the queue. Triage (purpose, lifecycle) stays a small line at the end.
@@ -397,17 +401,13 @@ function AttentionView({ projects, issues, layout, chooseLayout, apps, open, rev
     : <Button size="sm" onClick={() => void readDependencies(list.map(p => p.id))}><RefreshCw size={15} />{list.length}件を読み直す</Button>;
   const sections = issueKinds.filter(kind => kind !== 'vulnerable' && issues.groups.get(kind)!.length);
   const monitored = projects.filter(p => p.lifecycle !== 'archived');
-  const unavailable = monitored.filter(p => p.dependencyStatus === 'no-lock' || p.dependencyStatus === 'failed');
-  const remaining = monitored.filter(p => !unavailable.includes(p));
-  const unchecked = remaining.filter(p => !p.vulnerabilities);
-  const recheck = remaining.filter(p => p.vulnerabilities && (p.vulnerabilities.stale || p.vulnerabilities.status === 'partial' || p.dependencyStatus === 'partial'));
-  const current = remaining.length - unchecked.length - recheck.length;
-  // Every monitored project, those never checked or out of date first, within what one check accepts.
-  const checkAll = [...monitored].sort((a, b) => freshness(a) - freshness(b) || (a.vulnerabilities?.checkedAt ?? '').localeCompare(b.vulnerabilities?.checkedAt ?? '')).slice(0, checkLimit).map(p => p.id);
-  const header = <PageHeader context="あなたの開発アプリ" title="脆弱性と対応" subtitle="既知の脆弱性を優先度の高い順に進めます。止まっている確認と、まだ確認していないものは下にまとめます。">
-    {monitored.length > 0 && <Button variant="default" className="max-lg:px-3 max-lg:text-xs" title="アーカイブ以外のアプリをOSVに照会します。送る内容は照会の前に確認できます"
-      onClick={() => check(checkAll, `監視対象（アーカイブ以外）の${checkAll.length}件`)}>
-      <ShieldAlert size={17} />{monitored.length > checkLimit ? `監視対象のうち${checkLimit}件をチェック` : `監視対象${monitored.length}件をチェック`}</Button>}
+  const unavailable = monitored.filter(outOfScope);
+  const remaining = monitored.filter(diagnosable);
+  const checkAll = monitoredCheckIds(remaining);
+  const header = <PageHeader title="脆弱性と対応" subtitle="既知の脆弱性に、優先度の高い順で対応します。">
+    {remaining.length > 0 && <Button variant="default" className="max-lg:px-3 max-lg:text-xs" title="脆弱性診断可能なアプリ（アーカイブ以外）をOSVに照会します。送る内容は照会の前に確認できます"
+      onClick={() => check(checkAll, `脆弱性診断可能なアプリ（アーカイブ以外）の${checkAll.length}件`)}>
+      <ShieldAlert size={17} />{checkAllLabel(remaining.length)}</Button>}
   </PageHeader>;
   if (!projects.length) return <>{header}<Empty>
     <div className="mb-4 text-brand"><FolderSearch size={32} /></div>
@@ -417,7 +417,6 @@ function AttentionView({ projects, issues, layout, chooseLayout, apps, open, rev
   </Empty></>;
   return <>
     {header}
-    <p className="mb-6 border-y py-3 text-caption text-muted-foreground tabular-nums" aria-label="チェック範囲">監視対象 {monitored.length}アプリ · 最新結果 {current} · 要再確認 {recheck.length} · 未検査 {unchecked.length} · 判定できない {unavailable.length}<span className="mt-1 block">アーカイブ{projects.length - monitored.length}件は対象外。対応するlock形式の依存が対象で、公開先の稼働・反映は未確認です。{monitored.length > checkLimit && `チェックは1回${checkLimit}件までで、未検査・要再確認のものから選びます。`}</span></p>
     <QueueView projects={projects} reloadProjects={reloadProjects} notify={notify} check={check} apps={apps} open={open} openSettings={openSettings} hasUnchecked={issues.unchecked.length > 0} />
     {sections.length > 0 && <div className="mb-4 flex flex-wrap items-end justify-between gap-3 border-t pt-8">
       <div><h2 className="text-base font-semibold">ほかに確認が必要なもの</h2>
@@ -443,23 +442,17 @@ function AttentionView({ projects, issues, layout, chooseLayout, apps, open, rev
         {layout === 'list' && list.length > shown.length && <Button variant="ghost" size="sm" className="mt-2" onClick={() => setExpanded(prev => new Set(prev).add(kind))}>すべて表示（{list.length}件）</Button>}
       </section>;
     })}
-    <section aria-labelledby="not-yet" className="rounded-lg border bg-raised p-6 max-md:p-4">
-      <h2 id="not-yet" className="mb-1 text-sm font-semibold">まだ確認していないもの</h2>
-      <p className="mb-4 text-caption text-muted-foreground">問題が見つかったわけではありません。確認が済むまでは、安全とも言えません。</p>
-      <dl className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-3 text-xs">
-        <dt>脆弱性をまだチェックしていない（lockあり）<span className="ml-2 text-muted-foreground tabular-nums">{issues.unchecked.length}件</span></dt>
-        <dd>{issues.unchecked.length > 0 && <Button size="sm" onClick={() => check(issues.unchecked.map(p => p.id))}><ShieldAlert size={15} />{issues.unchecked.length}件をチェック</Button>}</dd>
-        <dt>依存情報をまだ読み取っていない<span className="ml-2 text-muted-foreground tabular-nums">{issues.unread.length}件</span></dt>
-        <dd>{issues.unread.length > 0 && <Button size="sm" onClick={toDependencies}><Package size={15} />依存検索でまとめて読み取る</Button>}</dd>
-        <dt>判定できる依存がない・読み取り失敗<span className="ml-2 text-muted-foreground tabular-nums">{unavailable.length}件</span><span className="mt-0.5 block">lockなし・未対応の形式など。脆弱性なしとは判定していません。</span></dt>
-        <dd>{unavailable.length > 0 && <Button size="sm" onClick={toDependencies}>依存情報を確認</Button>}</dd>
-      </dl>
-      <div className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-2 border-t pt-4 text-caption text-muted-foreground">
-        <span className="tabular-nums">整理（任意）: 用途が未入力 {issues.noPurpose.length}件・管理状態が未設定 {issues.untriaged.length}件</span>
-        {issues.noPurpose.length > 0 && <Button size="sm" variant="ghost" className="text-dim" disabled={filling} title="READMEやpackage.jsonの説明から、空欄だけに入れます。入力済みの用途は変えません" onClick={() => void fill()}><FileCode2 size={15} />{filling ? '読み取り中…' : 'READMEから用途を入れる'}</Button>}
-        {issues.untriaged.length > 0 && <Button size="sm" variant="ghost" className="text-dim" onClick={showUntriaged}><ListChecks size={15} />カタログで未設定を表示</Button>}
+    {/* What is left to check, as actions only; the totals above already give the counts. */}
+    {(issues.unchecked.length > 0 || issues.unread.length > 0 || unavailable.length > 0 || issues.noPurpose.length > 0 || issues.untriaged.length > 0) && <section aria-labelledby="not-yet" className="border-t pt-6">
+      <h2 id="not-yet" className="mb-3 text-sm font-semibold">まだ確認していないもの</h2>
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        {issues.unchecked.length > 0 && <Button size="sm" onClick={() => check(issues.unchecked.map(p => p.id))}><ShieldAlert size={15} />未チェック{issues.unchecked.length}件をチェック</Button>}
+        {issues.unread.length > 0 && <Button size="sm" variant="outline" onClick={toDependencies}><Package size={15} />依存の未読{issues.unread.length}件を読み取る</Button>}
+        {unavailable.length > 0 && <Button size="sm" variant="ghost" className="text-dim" title="照会できる依存がないアプリです（lockなし・未対応の形式など）。脆弱性なしとは判定していません" onClick={toDependencies}>診断対象外{unavailable.length}件を確認</Button>}
+        {issues.noPurpose.length > 0 && <Button size="sm" variant="ghost" className="text-dim" disabled={filling} title="READMEやpackage.jsonの説明から、空欄だけに入れます" onClick={() => void fill()}><FileCode2 size={15} />{filling ? '読み取り中…' : `用途が未入力の${issues.noPurpose.length}件にREADMEから入れる`}</Button>}
+        {issues.untriaged.length > 0 && <Button size="sm" variant="ghost" className="text-dim" onClick={showUntriaged}><ListChecks size={15} />管理状態が未設定の{issues.untriaged.length}件</Button>}
       </div>
-    </section>
+    </section>}
   </>;
 }
 
@@ -630,9 +623,9 @@ const splitTags = (value: string) => value.split(/[,、\n]/).map(t => t.trim()).
 const wrap = '[overflow-wrap:anywhere]';
 const headingTitle = 'mb-2 text-title leading-[1.35] font-[650] tracking-[-.035em] max-lg:text-[25px] max-md:text-2xl';
 
-function PageHeader({ context, title, subtitle, children }: { context: string; title: string; subtitle: string; children?: ReactNode }) {
-  return <header className="mb-8 flex items-center justify-between gap-6 max-lg:items-start max-md:mb-6 max-md:flex-wrap max-md:gap-4">
-    <div><p className="mb-2 text-xs text-muted-foreground max-md:text-caption">{context}</p><h1 className={headingTitle}>{title}</h1><p className="text-[13px] text-dim">{subtitle}</p></div>
+function PageHeader({ title, subtitle, children }: { title: string; subtitle: string; children?: ReactNode }) {
+  return <header className="mb-6 flex items-center justify-between gap-6 max-lg:items-start max-md:mb-4 max-md:flex-wrap max-md:gap-4">
+    <div><h1 className={headingTitle}>{title}</h1><p className="text-[13px] text-dim">{subtitle}</p></div>
     {children}
   </header>;
 }
@@ -642,6 +635,9 @@ function Empty({ className, children }: { className?: string; children: ReactNod
 }
 const emptyTitle = 'mt-4 mb-2 text-xl font-semibold tracking-[-.025em] max-md:text-lg';
 const emptyText = 'mb-6 text-[13px] text-muted-foreground max-md:text-xs';
+
+// The last two folders tell projects apart; the full path stays in the title.
+const shortPath = (path: string) => { const parts = path.split(/[\\/]/).filter(Boolean); return parts.length > 2 ? `…/${parts.slice(-2).join('/')}` : path; };
 
 function TechLine({ technologies }: { technologies: string[] }) {
   return <div className={cn('mt-1 text-caption text-muted-foreground', wrap)}>{technologies.join(' · ') || '技術構成は未確認'}</div>;
@@ -865,10 +861,13 @@ export function App() {
   // Every catalog total counts projects outside the archive, like 要対応.
   const activeProjects = projects.filter(p => p.lifecycle !== 'archived');
   const activeCount = activeProjects.length;
-  const checkedCount = activeProjects.filter(p => p.vulnerabilities).length;
-  const vulnerableCount = activeProjects.filter(p => p.vulnerabilities?.count).length;
+  // Checks only count among diagnosable projects; the rest have nothing a check can send.
+  const diagnosableProjects = activeProjects.filter(diagnosable);
+  const checkedCount = diagnosableProjects.filter(p => p.vulnerabilities).length;
+  const vulnerableCount = diagnosableProjects.filter(p => p.vulnerabilities?.count).length;
   const issues = useMemo(() => groupIssues(projects), [projects]);
   const attentionCount = issues.issueCount;
+  const showTotals = ready && projects.length > 0;
   const pageSelected = rows.length > 0 && rows.every(p => selected.has(p.id)) ? true : rows.some(p => selected.has(p.id)) ? 'indeterminate' : false;
   const mobileCell = 'max-md:block max-md:p-0';
   const reveal = (project: Project) => { setProblem(''); showInFinder(project).catch(e => setProblem((e as Error).message)); };
@@ -905,16 +904,25 @@ export function App() {
       })}</nav>
       <div className="mt-auto px-2 pt-6 text-caption text-dim max-lg:hidden">
         <div className="flex items-center gap-2"><span className="inline-block size-1.5 rounded-full bg-brand" />この端末に保存</div>
-        <p className="my-3 leading-[1.8] text-muted-foreground">ソースコードや依存の版は変更しません。設定は確認後に適用します。</p>
-        <span className="font-mono text-micro text-muted-foreground">v0.1 · カタログ初版</span>
+        <span className="mt-2 block font-mono text-micro text-muted-foreground">v0.1 · カタログ初版</span>
       </div>
     </aside>
     <main id="main" tabIndex={-1} className="ml-[232px] w-[calc(100%-232px)] px-12 pb-12 max-xl:ml-[196px] max-xl:w-[calc(100%-196px)] max-xl:px-8 max-lg:ml-0 max-lg:w-full max-lg:px-6 max-md:px-4">
-      <div className={cn('flex min-h-[66px] items-center gap-2 border-b text-xs text-muted-foreground max-md:min-h-12', projectArea ? 'mb-0' : 'mb-8 max-md:mb-6')}><span className="whitespace-nowrap max-md:hidden">ワークスペース</span><ChevronRight size={14} className="max-md:hidden" />
+      <div className={cn('flex min-h-[66px] items-center gap-2 border-b text-xs text-muted-foreground max-md:min-h-12', projectArea || showTotals ? 'mb-0' : 'mb-8 max-md:mb-6')}><span className="whitespace-nowrap max-md:hidden">ワークスペース</span><ChevronRight size={14} className="max-md:hidden" />
         {projectArea ? <><span>登録したアプリ</span><ChevronRight size={14} /><span>{detail ? 'アプリ詳細' : projectTabs.find(t => t.id === view)?.label}</span></> : <span>{navItems.find(n => n.id === view)?.label}</span>}
         <span className="ml-auto shrink-0 font-mono text-micro whitespace-nowrap">Local only</span></div>
+      {/* The catalog totals head every page, so the counts stay in view while working elsewhere. */}
+      {showTotals && <section aria-label="集計（アーカイブ以外）" className={cn('flex flex-wrap items-end gap-x-8 gap-y-3 border-b py-4 max-xl:gap-x-6 max-md:grid max-md:grid-cols-3 max-md:items-start max-md:gap-x-3', 'mb-6 max-md:mb-4')}>
+        {/* 脆弱性診断可能 → チェック済み → 既知の脆弱性あり each count within the one before. */}
+        {/* Each number opens the screen where it is worked on. */}
+        {([['登録', activeCount, '', 'catalog'], ['要対応', attentionCount, '', 'attention'], ['脆弱性診断可能', diagnosableProjects.length, `対象外 ${activeCount - diagnosableProjects.length}`, 'attention'],
+          ['チェック済み', checkedCount, `未チェック ${diagnosableProjects.length - checkedCount}`, 'attention'], ['既知の脆弱性あり', vulnerableCount, '', 'attention']] as const).map(([label, count, note, target], i) =>
+          <a key={label} href={`#${target}`} onClick={e => { e.preventDefault(); if (navigate(target) && target === 'catalog') clearFilters(); }} className="min-w-0 rounded-md text-foreground no-underline hover:[&_strong]:underline"><span className="mb-1 block text-xs text-dim max-md:text-micro">{label}</span>
+            <strong className={cn('text-title leading-[1.2] font-medium tabular-nums max-md:text-2xl', i === 0 && 'text-brand', i === 4 && count > 0 && 'text-error')}>{count}<small className="ml-1.5 text-caption font-normal text-muted-foreground">アプリ</small></strong>
+            {note && <span className="ml-2 text-caption text-muted-foreground tabular-nums max-md:ml-0 max-md:block">{note}</span>}</a>)}
+        <p className="ml-auto max-w-[300px] text-caption leading-[1.7] text-muted-foreground tabular-nums max-md:col-span-full max-md:ml-0 max-md:max-w-none">アーカイブ{projects.length - activeCount}件を除く。チェックしていないもの・診断対象外は、安全とは限りません。</p>
+      </section>}
 
-      {projectArea && !detail && <nav aria-label="登録したアプリの表示" className="mb-6 mt-3 flex flex-wrap gap-2 border-b pb-3">{projectTabs.map(tab => <a key={tab.id} href={`#${tab.id}`} aria-current={view === tab.id ? 'page' : undefined} onClick={e => { e.preventDefault(); if (navigate(tab.id)) clearFilters(); }} className={cn('inline-flex min-h-10 items-center gap-2 rounded-md px-3 text-caption no-underline hover:bg-accent', view === tab.id && 'bg-brand-subtle font-semibold text-brand')}><tab.icon size={15} />{tab.label}</a>)}</nav>}
       {!ready ? <Empty><Layers size={34} /><h1 className={emptyTitle}>カタログに接続しています</h1><p className={emptyText}>ローカルの保存データを読み込みます。</p></Empty> : detail ? current ?
         <ProjectDetail key={current.id} project={current} checkVulnerabilities={() => setChecking({ ids: [current.id] })} reloadProjects={() => reload().then(() => {})} apps={registeredApps} open={role => open(current, role)} openSettings={() => navigate('settings')} reveal={() => reveal(current)} remove={reason => setRemoving({ projects: [current], reason })} exclude={() => setExcluding([current.path])} onDirty={value => { unsaved.current = value; }} back={() => { unsaved.current = false; setDetail(null); location.hash = view; }} saved={async () => { await reload(); showToast('アプリを保存しました'); }} /> :
         <Empty><h1 className={emptyTitle}>アプリが見つかりません</h1><Button onClick={() => navigate('catalog')}>カタログに戻る</Button></Empty> :
@@ -948,39 +956,37 @@ export function App() {
           if (check && ids.length) setChecking({ ids: ids.slice(0, checkLimit), label: `今回登録した${Math.min(ids.length, checkLimit)}件` });
         }} changed={setInitialScan}
           exclusionsChanged={() => reload().catch(e => setProblem((e as Error).message))} showExcluded={() => { if (navigate('catalog')) { clearFilters(); setOnly('excluded'); } }} /> : <>
-        <PageHeader context="あなたの開発アプリ" title={view === 'archive' ? 'アーカイブ' : '登録したアプリ'} subtitle={view === 'archive' ? '過去の取り組みと、再開に必要な記録を残す。' : '作ったものを把握して、次の対応を決める。'}>
-          <Button variant="default" className="max-lg:px-3 max-lg:text-xs" onClick={() => navigate('discover')}><Plus size={17} />アプリを追加</Button>
+        <PageHeader title={view === 'archive' ? 'アーカイブ' : '登録したアプリ'} subtitle={view === 'archive' ? '一覧から外した、過去の取り組みの記録です。' : '作ったアプリの状態を確認します。'}>
+          <div className="flex flex-wrap gap-2"><Button variant="default" className="max-lg:px-3 max-lg:text-xs" onClick={() => navigate('discover')}><Plus size={17} />アプリを追加</Button>
+          {view === 'catalog' && diagnosableProjects.length > 0 && <Button variant="outline" className="max-lg:px-3 max-lg:text-xs" title="脆弱性診断可能なアプリ（アーカイブ以外）をOSVに照会します。送る内容は照会の前に確認でき、始めると「脆弱性と対応」に移ります"
+            onClick={() => { const ids = monitoredCheckIds(diagnosableProjects); setChecking({ ids, label: `脆弱性診断可能なアプリ（アーカイブ以外）の${ids.length}件` }); }}>
+            <ShieldAlert size={17} />{checkAllLabel(diagnosableProjects.length)}</Button>}</div>
         </PageHeader>
+        <nav aria-label="登録したアプリの表示" className="mb-4 flex flex-wrap gap-2 border-b pb-3">{projectTabs.map(tab => { const on = view === tab.id && includeArchived === tab.all; return <a key={tab.label} href={`#${tab.id}`} aria-current={on ? 'page' : undefined} onClick={e => { e.preventDefault(); if (navigate(tab.id)) { clearFilters(); setIncludeArchived(tab.all); } }} className={cn('inline-flex min-h-10 items-center gap-2 rounded-md px-3 text-caption no-underline hover:bg-accent', on && 'bg-brand-subtle font-semibold text-brand')}><tab.icon size={15} />{tab.label}</a>; })}</nav>
         {batch && view === 'catalog' && projects.some(p => p.importBatch === batch && p.lifecycle !== 'archived') && <section aria-label="登録後の次のステップ" className="mb-6 rounded-lg border bg-raised p-4"><h2 className="mb-1 text-sm font-semibold">次は、登録したアプリの脆弱性をチェック</h2><p className="mb-3 text-caption text-muted-foreground">用途・タグの入力は任意です。外部へ送るパッケージ情報を確認してからチェックを始めます。</p><Button onClick={() => setChecking({ ids: projects.filter(p => p.importBatch === batch && p.lifecycle !== 'archived').slice(0, checkLimit).map(p => p.id), label: '今回登録したアプリ' })}>登録したアプリの脆弱性をチェック</Button><Button className="ml-2" variant="ghost" onClick={() => navigate('attention')}>優先度の高いものから対応</Button></section>}
-        <section aria-label="集計（アーカイブ以外）" className="mb-8 grid grid-cols-[1fr_1fr_1fr_1fr_2.4fr] gap-6 border-y py-6 max-xl:grid-cols-4 max-xl:gap-4 max-md:mb-6 max-md:grid-cols-2 max-md:py-4">
-          {([['登録（アーカイブ以外）', activeCount], ['要対応', attentionCount], ['既知の脆弱性あり', vulnerableCount], ['脆弱性をチェック済み', checkedCount]] as const).map(([label, count], i) =>
-            <div key={label} className="flex flex-col gap-2"><span className="text-xs text-dim max-md:text-micro">{label}</span><strong className={cn('text-title leading-[1.2] font-medium tabular-nums max-md:text-2xl', i === 0 && 'text-brand', i === 2 && count > 0 && 'text-error')}>{count}<small className="ml-1.5 text-caption font-normal text-muted-foreground">アプリ</small></strong></div>)}
-          <div className="flex items-center gap-3 border-l pl-6 text-dim max-xl:col-span-full max-xl:border-t max-xl:border-l-0 max-xl:pt-4 max-xl:pl-0">
-            {vulnerableCount ? <ShieldAlert size={24} className="shrink-0 text-error" /> : <ShieldQuestion size={24} className="shrink-0" />}
-            <div><strong className="text-xs font-semibold">数はすべてアーカイブ以外のアプリ</strong>
-              <p className="mt-1 text-caption leading-[1.8] text-muted-foreground tabular-nums">アーカイブの{projects.length - activeCount}件は含みません。チェックしていないものは安全とは限りません。<br className="max-xl:hidden" />更新候補・Gitの状態は未確認です。用途・管理状態の整理がまだのもの{issues.triageCount}件。</p></div>
-          </div>
-        </section>
         <section aria-label="アプリ一覧">
-          <div className="flex items-center gap-4 max-md:gap-2">
-            <SearchBox label="アプリを検索" className="w-[min(520px,100%)] max-md:min-w-0 max-md:flex-1"><Search size={18} className="shrink-0" /><Input ref={searchRef} className={searchInput} value={query} onChange={e => setQuery(e.target.value)} placeholder="名前、パス、技術、タグで検索" /><kbd className="shrink-0 rounded-sm border px-1.5 text-micro max-md:hidden">{capabilities.platform === 'win32' ? 'Ctrl K' : '⌘ K'}</kbd></SearchBox>
-            <span className="ml-auto text-xs whitespace-nowrap text-muted-foreground tabular-nums">{visible.length}件</span>
-            {view !== 'archive' && <Button size="sm" variant="ghost" className="text-dim" disabled={!!gitProgress || activeCount === 0} onClick={() => {
-              setProblem('');
-              void request<{ queued: number }>('/git/read-all', {}).then(({ queued }) => {
-                setNotice(`アーカイブ以外の${queued}件のGit情報を読み取ります`); watchGitReads();
-              }, e => setProblem((e as Error).message));
-            }} title="各アプリの .git からブランチとリモートを読みます。fetch や変更の確認はしません"><GitBranch size={15} /><span className="max-md:sr-only">{gitProgress ? 'Git読み取り中…' : `Gitをすべて読む（${activeCount}）`}</span></Button>}
-            <Button size="sm" variant="ghost" className="text-dim" onClick={() => void recheck()} title="登録したフォルダがあるかを確認します"><RefreshCw size={15} /><span className="max-md:sr-only">存在を再確認</span></Button>
-          </div>
-          <div className="flex flex-wrap items-center gap-3 pt-4 pb-6 max-md:gap-2 max-md:pb-4">
-            <NativeSelect size="sm" aria-label="技術で絞り込み" value={tech} onChange={e => setTech(e.target.value)}><NativeSelectOption value="">すべての技術</NativeSelectOption>{technologies.map(t => <NativeSelectOption key={t}>{t}</NativeSelectOption>)}</NativeSelect>
-            <NativeSelect size="sm" aria-label="管理状態で絞り込み" value={lifecycle} onChange={e => setLifecycle(e.target.value)}><NativeSelectOption value="">すべての管理状態</NativeSelectOption>{Object.entries(lifecycleLabels).filter(([key]) => view === 'archive' ? key === 'archived' : key !== 'archived' || includeArchived).map(([key, label]) => <NativeSelectOption key={key} value={key}>{label}</NativeSelectOption>)}</NativeSelect>
-            <NativeSelect size="sm" aria-label="Gitで絞り込み" value={gitFilter} onChange={e => setGitFilter(e.target.value as GitFilter | '')}><NativeSelectOption value="">すべてのGit</NativeSelectOption>{Object.entries(gitFilterLabels).map(([key, label]) => <NativeSelectOption key={key} value={key}>{label}</NativeSelectOption>)}</NativeSelect>
-            {view !== 'archive' && <div className="flex min-h-10 items-center gap-2"><Checkbox id="include-archived" checked={includeArchived} onCheckedChange={checked => { setIncludeArchived(checked === true); setLifecycle(''); }} /><Label htmlFor="include-archived" className="cursor-pointer font-normal text-dim">アーカイブを含む</Label></div>}
+          {/* One toolbar: search, filters, count and layout. Catalog-wide maintenance sits in その他の操作. */}
+          <div className="mb-4 flex flex-wrap items-center gap-2">
+            <SearchBox label="アプリを検索" className="w-[min(360px,100%)] max-md:w-full"><Search size={18} className="shrink-0" /><Input ref={searchRef} className={searchInput} value={query} onChange={e => setQuery(e.target.value)} placeholder="名前、パス、技術、タグ" /><kbd className="shrink-0 rounded-sm border px-1.5 text-micro max-md:hidden">{capabilities.platform === 'win32' ? 'Ctrl K' : '⌘ K'}</kbd></SearchBox>
+            <NativeSelect size="sm" aria-label="技術で絞り込み" value={tech} onChange={e => setTech(e.target.value)}><NativeSelectOption value="">技術</NativeSelectOption>{technologies.map(t => <NativeSelectOption key={t}>{t}</NativeSelectOption>)}</NativeSelect>
+            <NativeSelect size="sm" aria-label="管理状態で絞り込み" value={lifecycle} onChange={e => setLifecycle(e.target.value)}><NativeSelectOption value="">管理状態</NativeSelectOption>{Object.entries(lifecycleLabels).filter(([key]) => view === 'archive' ? key === 'archived' : key !== 'archived' || includeArchived).map(([key, label]) => <NativeSelectOption key={key} value={key}>{label}</NativeSelectOption>)}</NativeSelect>
+            <NativeSelect size="sm" aria-label="Gitで絞り込み" value={gitFilter} onChange={e => setGitFilter(e.target.value as GitFilter | '')}><NativeSelectOption value="">Git</NativeSelectOption>{Object.entries(gitFilterLabels).map(([key, label]) => <NativeSelectOption key={key} value={key}>{label}</NativeSelectOption>)}</NativeSelect>
+            {(query || tech || lifecycle || gitFilter) && <Button size="sm" variant="ghost" className="text-dim" onClick={() => { setQuery(''); setTech(''); setLifecycle(''); setGitFilter(''); }}><X size={14} />条件を解除</Button>}
             <div className="ml-auto flex items-center gap-1">
-              {layout === 'list' && <span className="mr-2 text-caption text-muted-foreground max-lg:hidden">確認が必要な順</span>}
+              <span className="mr-2 text-xs whitespace-nowrap text-muted-foreground tabular-nums">{visible.length}件</span>
               <LayoutSwitch layout={layout} choose={chooseLayout} />
+              <details className="relative">
+                <summary aria-label="その他の操作" title="その他の操作" className="flex size-9 cursor-pointer list-none items-center justify-center rounded-md text-dim hover:bg-accent [&::-webkit-details-marker]:hidden">⋯</summary>
+                <div className="absolute right-0 z-20 mt-1 grid w-max min-w-[220px] gap-1 rounded-md border bg-raised p-1 shadow-dialog">
+                  {view !== 'archive' && <Button size="sm" variant="ghost" className="justify-start" disabled={!!gitProgress || activeCount === 0} onClick={() => {
+                    setProblem('');
+                    void request<{ queued: number }>('/git/read-all', {}).then(({ queued }) => {
+                      setNotice(`アーカイブ以外の${queued}件のGit情報を読み取ります`); watchGitReads();
+                    }, e => setProblem((e as Error).message));
+                  }} title="各アプリの .git からブランチとリモートを読みます。fetch や変更の確認はしません"><GitBranch size={15} />{gitProgress ? 'Git読み取り中…' : `Gitをすべて読む（${activeCount}）`}</Button>}
+                  <Button size="sm" variant="ghost" className="justify-start" onClick={() => void recheck()} title="登録したフォルダがあるかを確認します"><RefreshCw size={15} />存在を再確認</Button>
+                </div>
+              </details>
             </div>
           </div>
           {missingProjects.length > 0 && <div className="mb-4 flex flex-wrap items-center gap-3 rounded-md bg-error-subtle px-4 py-3 text-xs text-error">
@@ -1004,24 +1010,22 @@ export function App() {
           rows.length > 0 ? <Table containerClassName="max-md:overflow-visible" className="max-md:block">
             <TableHeader className="max-md:hidden"><TableRow className="border-0">
               <TableHead className="w-8 pr-0 pl-2"><Checkbox aria-label="このページをすべて選択" checked={pageSelected} onCheckedChange={checked => setSelected(checked === true ? new Set(rows.map(p => p.id)) : new Set())} /></TableHead>
-              <TableHead>アプリ</TableHead><TableHead>対応・確認</TableHead><TableHead className="max-xl:hidden">Git</TableHead><TableHead className="max-lg:hidden">管理状態</TableHead><TableHead className="max-xl:hidden">構成の確認</TableHead><TableHead><span className="sr-only">詳細</span></TableHead>
+              <TableHead>アプリ</TableHead><TableHead>対応・確認</TableHead><TableHead className="max-xl:hidden">Git</TableHead><TableHead className="max-lg:hidden">管理状態</TableHead><TableHead><span className="sr-only">詳細</span></TableHead>
             </TableRow></TableHeader>
             <TableBody className="max-md:block">{rows.map(project => <TableRow key={project.id} data-state={selected.has(project.id) ? 'selected' : undefined} className="max-md:grid max-md:grid-cols-[24px_minmax(0,1fr)_auto] max-md:gap-x-2 max-md:border-t max-md:border-b-0 max-md:py-4">
               <TableCell className={cn('w-8 pr-0 pl-2', mobileCell, 'max-md:col-start-1 max-md:row-span-2 max-md:row-start-1 max-md:w-auto max-md:pt-1')}><Checkbox aria-label={`${project.name}を選択`} checked={selected.has(project.id)} onCheckedChange={() => toggle(project.id)} /></TableCell>
               <TableCell className={cn('w-[40%] max-w-[520px] min-w-[200px]', mobileCell, 'max-md:col-start-2 max-md:w-auto max-md:max-w-none max-md:min-w-0')}>
                 <a className={cn('text-sm font-semibold text-foreground no-underline', wrap)} href={`#project/${project.id}`}>{project.name}</a>
-                <code className={cn('mt-1 block text-caption text-muted-foreground', wrap)} title={project.path}>{project.path}</code>
-                <TechLine technologies={project.technologies} />
-                {project.purpose && <div className={cn('mt-2 max-w-[300px] text-caption text-dim', wrap)}>{project.purpose}</div>}
-                {project.tags.length > 0 && <div className="mt-2 flex flex-wrap gap-1">{project.tags.map(t => <Badge key={t}>{t}</Badge>)}</div>}
+                <code className="mt-0.5 block truncate text-caption text-muted-foreground" title={project.path}>{shortPath(project.path)}</code>
+                {project.purpose && <div className="mt-1 max-w-[480px] truncate text-caption text-dim" title={project.purpose}>{project.purpose}</div>}
+                <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1"><TechLine technologies={project.technologies} />{project.tags.map(t => <Badge key={t}>{t}</Badge>)}</div>
               </TableCell>
               <TableCell className={cn(mobileCell, 'max-md:col-start-2 max-md:mt-3')}>
                 <ProjectStatus project={project} />
-                <div className="mt-2 xl:hidden"><GitLine project={project} /></div>
+                {project.gitStatus && <div className="mt-2 xl:hidden"><GitLine project={project} /></div>}
               </TableCell>
-              <TableCell className="max-xl:hidden align-top"><GitLine project={project} /></TableCell>
+              <TableCell className="max-xl:hidden">{project.gitStatus && <GitLine project={project} />}</TableCell>
               <TableCell className="max-lg:hidden"><LifecycleLabel lifecycle={project.lifecycle} /></TableCell>
-              <TableCell className="max-xl:hidden"><time className="text-caption whitespace-nowrap text-muted-foreground" dateTime={project.observedAt}>{date(project.observedAt)}</time></TableCell>
               <TableCell className={cn('pr-0', mobileCell, 'max-md:col-start-3 max-md:row-start-1')}><ProjectActions project={project} apps={registeredApps} open={open} reveal={reveal} /></TableCell>
             </TableRow>)}</TableBody>
           </Table> : <Empty>
@@ -1030,10 +1034,7 @@ export function App() {
             <p className={emptyText}>{projects.length ? '検索条件を変えると、ほかのアプリを探せます。' : '親フォルダを探索し、見つかった候補から登録できます。'}</p>
             <Button variant={projects.length ? 'outline' : 'default'} onClick={() => projects.length ? clearFilters() : navigate('discover')}>{projects.length ? '検索条件を解除' : 'フォルダから探す'}<ArrowRight size={16} /></Button>
           </Empty>}
-          <div className="flex items-center justify-between gap-4 py-4 text-micro text-muted-foreground max-md:flex-wrap max-md:border-t">
-            <span>構成はローカル設定から検出。クラウドの実態は未確認です。</span>
-            {layout === 'list' && visible.length > 30 && <Pagination page={page} total={visible.length} move={delta => { setPage(p => p + delta); setSelected(new Set()); }} />}
-          </div>
+          {layout === 'list' && visible.length > 30 && <div className="flex justify-end py-4"><Pagination page={page} total={visible.length} move={delta => { setPage(p => p + delta); setSelected(new Set()); }} /></div>}
         </section>
       </>}
     </main>
@@ -1397,19 +1398,19 @@ function Discovery({ initial, imported, changed, exclusionsChanged, showExcluded
   }
   const insideNotice = <p role="status" className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-caption text-warning"><CircleAlert size={14} className="shrink-0" />追加した除外の中に、登録済みのアプリが{registeredInside}件あります。<a href="#catalog" className="text-inherit underline" onClick={e => { e.preventDefault(); showExcluded(); }}>カタログで確認して外す</a></p>;
   return <>
-    <PageHeader context="ローカルの開発資産を見つける" title="アプリを追加" subtitle="親フォルダを探索して、登録するアプリを選びます。" />
+    <PageHeader title="アプリを追加" subtitle="フォルダを探して、登録するアプリを選びます。" />
     <section aria-label="探索するフォルダ" className="mb-6 rounded-lg border bg-raised p-6 max-md:p-4">
       <div className="flex items-center gap-3 max-md:flex-wrap">
         <FolderSearch size={19} className="shrink-0 text-muted-foreground max-md:hidden" />
         <div className="min-w-0 flex-1 max-md:basis-full">
           <p className="text-xs font-medium">探索するフォルダ{roots && <span className="ml-1.5 font-normal text-muted-foreground tabular-nums">{roots.length}件{!showSettings && ` · 除外 ${exclusions.length}件`}</span>}</p>
-          <p className="mt-1 text-caption text-muted-foreground">登録したフォルダは、いつでも再探索できます。依存物・ビルド成果物・シンボリックリンク・Claude Code の作業用コピー（.claude/worktrees）は除外します。</p>
+          <p className="mt-1 text-caption text-muted-foreground">依存物・ビルド成果物・シンボリックリンク・作業用コピー（.claude/worktrees）は読みません。</p>
         </div>
         {roots && roots.length + exclusions.length > 0 && <Button variant="ghost" size="sm" className="text-dim max-md:order-last" aria-expanded={showSettings} aria-controls={settingsId}
           aria-label={showSettings ? '探索フォルダと除外の一覧を隠す' : '探索フォルダと除外の一覧を表示'} onClick={toggleSettings}>
           {showSettings ? <ChevronDown size={15} /> : <ChevronRight size={15} />}{showSettings ? '一覧を隠す' : '一覧を表示'}</Button>}
         {!!roots?.length && <Button className="max-md:w-full" disabled={locked} title="登録したフォルダを順に探索し直し、すべての候補をまとめて表示します" onClick={() => void scanEverything()}><RefreshCw size={15} />すべて探索</Button>}
-        <Button variant={capabilities.folderPicker ? 'outline' : 'default'} className="max-md:w-full" disabled={locked} onClick={() => setPathTarget('scan')}>探索フォルダをパスで追加</Button>
+        <Button variant={capabilities.folderPicker ? 'ghost' : 'default'} className={cn('max-md:w-full', capabilities.folderPicker && 'text-dim')} aria-label="探索フォルダをパスで追加" disabled={locked} onClick={() => setPathTarget('scan')}>{capabilities.folderPicker ? 'パスで入力' : '探索フォルダをパスで追加'}</Button>
         {capabilities.folderPicker && <Button variant="default" className="max-md:w-full" disabled={locked} onClick={() => void pick()}><Plus size={16} />{picking ? 'フォルダを選択中…' : busy ? '準備中…' : 'フォルダを追加'}</Button>}
       </div>
       {!capabilities.folderPicker && <p className="mt-3 text-caption text-muted-foreground">フォルダのパスを直接入力して追加します。フォルダ選択・外部アプリ起動は、このOSでは利用できません。</p>}
@@ -1437,7 +1438,7 @@ function Discovery({ initial, imported, changed, exclusionsChanged, showExcluded
       <div className="mt-6 border-t pt-4" aria-label="除外するフォルダ" role="group">
         <div className="flex items-center gap-3 max-md:flex-wrap">
           <div className="min-w-0 flex-1"><p className="text-xs font-medium">除外するフォルダ<span className="ml-1.5 font-normal text-muted-foreground tabular-nums">{exclusions.length}件</span></p>
-            <p className="mt-1 text-caption text-muted-foreground">指定したフォルダとそのサブフォルダは、すべての探索で読み取りません。</p></div>
+            <p className="mt-1 text-caption text-muted-foreground">サブフォルダも含めて読みません。</p></div>
           <Button size="sm" className="max-md:w-full" disabled={locked} onClick={() => setPathTarget('exclude')}>除外フォルダをパスで追加</Button>
           {capabilities.folderPicker && <Button size="sm" className="max-md:w-full" disabled={locked} onClick={() => void pickExclusion()}><FolderMinus size={15} />除外するフォルダを追加</Button>}
         </div>
@@ -1520,7 +1521,7 @@ function Discovery({ initial, imported, changed, exclusionsChanged, showExcluded
 
 function SettingsView({ apps, changed, toDiscover }: { apps: OpenApps; changed: (apps: OpenApps) => void; toDiscover: () => void }) {
   return <>
-    <PageHeader context="この端末での使い方" title="設定・使い方" subtitle="使い方を確認し、探索フォルダや作業用のアプリを設定します。" />
+    <PageHeader title="設定・使い方" subtitle="作業用のアプリや探索フォルダを設定します。" />
     <UsageGuide />
     <section className="mb-8 border-y py-5"><h2 className="mb-2 text-sm font-semibold">探索・除外フォルダ</h2><p className="mb-3 text-caption text-muted-foreground">探す範囲と、今後は探さないフォルダを管理します。登録済みアプリの整理とは別の設定です。</p><Button onClick={toDiscover} variant="outline" size="sm">探索・除外フォルダを管理</Button></section>
     <OpenAppSettings apps={apps} changed={changed} />
@@ -1774,17 +1775,18 @@ function DependencySearch({ projects, toCatalog, reading, readAll, readSelected 
   const described = result && `${result.mode === 'exact' ? `「${result.name}」という名前` : `名前に「${result.name}」を含`}${result.version ? `${result.mode === 'exact' ? 'で' : 'み'}版が ${result.version} の` : result.mode === 'exact' ? 'の' : 'む'}`;
   const coverage = result?.coverage || { read: read.length, withLock: read.filter(p => p.dependencyStatus === 'complete' || p.dependencyStatus === 'partial').length, total: projects.length, unsupported: projects.filter(project => project.dependencyUnsupported).length };
   return <>
-    <PageHeader context="依存パッケージから探す" title="依存検索" subtitle="読み取った依存の記録（lockファイル・go.mod・pom.xml など）から、パッケージを使っているアプリを探します。" />
+    <PageHeader title="依存検索" subtitle="パッケージを使っているアプリを探します。" />
     <h2 ref={heading} tabIndex={-1} className="sr-only">パッケージを検索</h2>
     <form onSubmit={search} role="search" className="mb-2 flex flex-wrap items-end gap-3">
-      <div className="flex min-w-[240px] flex-1 flex-col gap-2"><Label htmlFor={`${id}-name`}>パッケージ名</Label><Input id={`${id}-name`} value={text} onChange={e => setText(e.target.value)} placeholder="brotli、@types/node、next@15.1.0 など" maxLength={480} autoComplete="off" spellCheck={false} /></div>
+      <div className="flex min-w-[240px] flex-1 flex-col"><Label htmlFor={`${id}-name`} className="sr-only">パッケージ名</Label><Input id={`${id}-name`} value={text} onChange={e => setText(e.target.value)} placeholder="パッケージ名の一部（brotli、@types/node）。版は next@15.1.0" maxLength={480} autoComplete="off" spellCheck={false} /></div>
       <Button variant="default" disabled={busy} className="max-md:w-full"><Search size={16} />{busy ? '検索中…' : '検索'}</Button>
       {result && <Button type="button" variant="ghost" onClick={clear} className="max-md:w-full">クリア</Button>}
     </form>
-    <p className="mb-4 text-caption text-muted-foreground">名前の一部で探します（大文字・小文字は区別しません）。版でも絞るときは「next@15.1.0」のように @ のあとに版を書きます。</p>
-    <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-      <p className="text-caption text-muted-foreground tabular-nums">依存の読み取りを実施 {coverage.read}件 / 登録 {coverage.total}件（解析できた記録 {coverage.withLock}件）。読み取っていないアプリは結果に含まれません。未対応の依存形式は検索対象外です。コード内やOS標準ライブラリの使用は検索しません。脆弱性の有無は判定しません。{(coverage.unsupported ?? 0) > 0 && <span className="mt-1 block text-warning">未対応の依存形式を含むアプリ {coverage.unsupported}件は、一部または全体が検索対象外です。下の「依存の検索範囲」で確認し、読み直せます。</span>}</p>
-      <Button size="sm" disabled={reading || !activeCount} onClick={() => void readAll()} title="lockファイルを読むだけで、インストールや実行、外部への送信はしません"><RefreshCw size={14} />{reading ? '読み取り中…' : `アーカイブ以外をすべて読み取る（${activeCount}件）`}</Button>
+    {/* One line of scope; the details and re-reads are in 依存の検索範囲 below. */}
+    <div className="mb-6 flex flex-wrap items-center gap-x-3 gap-y-1 text-caption text-muted-foreground tabular-nums">
+      <span>依存の読み取りを実施 {coverage.read}件 / 登録 {coverage.total}件。読み取っていないアプリと未対応の形式は検索しません。</span>
+      {(coverage.unsupported ?? 0) > 0 && <span className="text-warning">未対応の依存形式を含むアプリ {coverage.unsupported}件</span>}
+      <Button size="sm" variant="ghost" className="ml-auto text-dim" disabled={reading || !activeCount} onClick={() => void readAll()} title="lockファイルを読むだけで、インストールや実行、外部への送信はしません"><RefreshCw size={14} />{reading ? '読み取り中…' : `アーカイブ以外をすべて読み取る（${activeCount}件）`}</Button>
     </div>
     {error && <Alert variant="destructive" className="mb-6"><CircleAlert size={18} /><AlertDescription>{error}</AlertDescription></Alert>}
     {coverage.read === 0 ? <Empty>
@@ -1797,7 +1799,7 @@ function DependencySearch({ projects, toCatalog, reading, readAll, readSelected 
         <TableHeader><TableRow className="border-0"><TableHead>アプリ</TableHead><TableHead>一致した依存</TableHead><TableHead className="max-lg:hidden">読み取り</TableHead></TableRow></TableHeader>
         <TableBody>{result.matches.map(match => <TableRow key={match.project.id}>
           <TableCell className="w-[38%] align-top max-md:w-auto"><a className={cn('text-sm font-semibold text-foreground no-underline', wrap)} href={`#project/${match.project.id}`}>{match.project.name}</a>
-            <code className={cn('mt-1 block text-caption text-muted-foreground', wrap)}>{match.project.path}</code><div className="mt-2"><LifecycleLabel lifecycle={match.project.lifecycle} /></div></TableCell>
+            <code className="mt-0.5 block truncate text-caption text-muted-foreground" title={match.project.path}>{shortPath(match.project.path)}</code><div className="mt-1"><LifecycleLabel lifecycle={match.project.lifecycle} /></div></TableCell>
           <TableCell className="align-top"><ul className="grid gap-2">{match.dependencies.map((d, i) => <li key={i}><DependencyLine dependency={d} /></li>)}</ul></TableCell>
           <TableCell className="align-top max-lg:hidden"><time className="text-caption whitespace-nowrap text-muted-foreground" dateTime={match.readAt}>{date(match.readAt)}</time>
             {match.status !== 'complete' && <span className="mt-1 block text-micro text-warning">{dependencyStatusLabels[match.status]}</span>}</TableCell>

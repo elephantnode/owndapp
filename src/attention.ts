@@ -10,16 +10,27 @@ export const issueKinds: IssueKind[] = ['vulnerable', 'recheck', 'missing', 'exc
 export function issuesOf(p: Project): IssueKind[] {
   const issues: IssueKind[] = [];
   if (p.vulnerabilities?.count) issues.push('vulnerable');
-  if (p.vulnerabilities && (p.vulnerabilities.stale || p.vulnerabilities.status === 'partial')) issues.push('recheck');
+  if (needsRecheck(p)) issues.push('recheck');
   if (p.missing) issues.push('missing');
   if (p.excluded) issues.push('excluded');
-  if (p.evidence.some(e => e.detail.includes('失敗')) || p.dependencyStatus === 'failed' || p.dependencyStatus === 'partial') issues.push('read-failed');
+  if (p.evidence.some(e => e.detail.includes('失敗')) || unreadable(p)) issues.push('read-failed');
   return issues;
 }
 export const hasIssue = (p: Project) => issuesOf(p).length > 0;
+/** A dependency file in a supported format could not be read. Unsupported formats are out of scope instead. */
+export const unreadable = (p: Project) => (p.dependencyUnreadable ?? 0) > 0;
+/**
+ * The last check is out of date, or something a check covers was left out (a failed query, an unreadable file).
+ * A check left partial only by unsupported formats stays partial, so it never resolves a finding, but checking again would not change it.
+ */
+export const needsRecheck = (p: Project) => !!p.vulnerabilities && (p.vulnerabilities.stale || (p.vulnerabilities.status === 'partial' && (!!p.vulnerabilities.queryFailed || unreadable(p))));
 export const needsTriage = (p: Project) => p.lifecycle === 'untriaged' || !p.purpose;
-/** npm dependencies were read but never checked for known vulnerabilities. */
-export const unchecked = (p: Project) => !p.vulnerabilities && (p.dependencyStatus === 'complete' || p.dependencyStatus === 'partial');
+/** Out of scope for vulnerability checks: dependencies were read and none can be sent (no lockfile, unsupported format, only Git or local references). */
+export const outOfScope = (p: Project) => p.diagnosable === false;
+/** Diagnosable, or not read yet: a check reads dependencies first, so those are still worth sending. */
+export const diagnosable = (p: Project) => !outOfScope(p);
+/** Diagnosable dependencies were read but never checked for known vulnerabilities. */
+export const unchecked = (p: Project) => !p.vulnerabilities && p.diagnosable === true;
 export const unread = (p: Project) => !p.dependencyStatus;
 
 const severityRank: Record<Severity, number> = { malicious: 5, critical: 4, high: 3, moderate: 2, low: 1, unknown: 0 };

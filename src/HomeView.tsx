@@ -7,6 +7,7 @@ import type { OpenApps, Priority, Project, ResponseStatus, Scan, Severity } from
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { needsRecheck, outOfScope } from './attention';
 
 const checkLimit = 1000;
 const wrap = '[overflow-wrap:anywhere]';
@@ -55,7 +56,6 @@ export function HomeView({ apps, appsChanged, projects, initialScan, toDiscover,
 
   if (!registered) return <>
     <header className="mb-8 max-md:mb-6">
-      <p className="mb-2 text-xs text-muted-foreground max-md:text-caption">ホーム</p>
       <h1 className="mb-2 text-title leading-[1.35] font-[650] tracking-[-.035em] max-lg:text-[25px] max-md:text-2xl">最初のアプリを登録しましょう</h1>
       <p className="max-w-[640px] text-[13px] text-dim">この端末にある自分のアプリを集めて、使っているパッケージの既知の脆弱性を確認し、対応を記録します。</p>
     </header>
@@ -79,10 +79,10 @@ export function HomeView({ apps, appsChanged, projects, initialScan, toDiscover,
   // Missing folders and folders under an exclusion are left to the user; they are not picked for a check automatically.
   const eligible = active.filter(p => !p.missing && !p.excluded);
   const skipped = active.length - eligible.length;
-  const undecidable = eligible.filter(p => p.dependencyStatus === 'no-lock' || p.dependencyStatus === 'failed');
+  const undecidable = eligible.filter(outOfScope);
   const checkable = eligible.filter(p => !undecidable.includes(p));
   const unchecked = checkable.filter(p => !p.vulnerabilities);
-  const outdated = checkable.filter(p => p.vulnerabilities && (p.vulnerabilities.stale || p.vulnerabilities.status === 'partial' || p.dependencyStatus === 'partial'));
+  const outdated = checkable.filter(needsRecheck);
   const targets = [...unchecked, ...[...outdated].sort((a, b) => a.vulnerabilities!.checkedAt.localeCompare(b.vulnerabilities!.checkedAt))];
   const selected = targets.slice(0, checkLimit).map(p => p.id);
   const withFindings = active.filter(p => p.vulnerabilities?.count).length;
@@ -95,6 +95,10 @@ export function HomeView({ apps, appsChanged, projects, initialScan, toDiscover,
   const names = new Map(projects.map(p => [p.id, p.name]));
   const topProjects = [...byProject].sort(([ia, a], [ib, b]) => severityRank[highest(b)] - severityRank[highest(a)] || b.length - a.length || (names.get(ia) ?? '').localeCompare(names.get(ib) ?? '')).slice(0, 3);
   const leadWithWork = urgent.length > 0;
+  // Counted by app, each under its most urgent open record.
+  const openApps = new Set(open.map(w => w.projectId));
+  const highApps = new Set(open.filter(w => w.priority === 'high').map(w => w.projectId));
+  const reviewApps = new Set(open.filter(w => w.priority === 'review' && !highApps.has(w.projectId)).map(w => w.projectId));
 
   const workRow = error ? <Row icon={<CircleAlert size={18} className="text-error" />} title="対応状況を読み込めませんでした"
     text={<span role="alert">{error}。未完了の対応がないという意味ではありません。</span>}
@@ -104,10 +108,10 @@ export function HomeView({ apps, appsChanged, projects, initialScan, toDiscover,
       text={<>チェックで見つかったものだけが対象です。まだチェックしていない・結果が古いアプリの分は含みません。{withFindings > 0 && `既知の脆弱性が検出されたアプリは${withFindings}件あります（対象外にしたものを含む）。`}</>}
       action={<Button size="sm" onClick={toAttention}>脆弱性と対応を見る</Button>} />
     : <Row icon={<ShieldAlert size={18} className={leadWithWork ? 'text-error' : 'text-warning'} />}
-      title={<>未完了の対応 <span className="tabular-nums">{open.length}件</span></>}
+      title={<>未完了の対応 <span className="tabular-nums">{openApps.size}アプリ</span></>}
       text={<>
         <span className="block tabular-nums">最も重いもの: <span className={cn('font-semibold', severityTone(highest(open)))}>{severityLabels[highest(open)]}</span>
-          {' · '}優先度 高 {open.filter(w => w.priority === 'high').length}件 · 要確認 {open.filter(w => w.priority === 'review').length}件 · ほか {open.length - urgent.length}件</span>
+          {' · '}優先度 高 {highApps.size}アプリ · 要確認 {reviewApps.size}アプリ · ほか {openApps.size - highApps.size - reviewApps.size}アプリ（脆弱性 {open.length}件）</span>
         {topProjects.length > 0 && <span className="mt-1 block">{topProjects.map(([id, list], i) => <span key={id}>{i > 0 && '、'}
           <a className={cn('font-semibold text-foreground', wrap)} href={`#project/${id}`}>{names.get(id) ?? id}</a>
           <span className="tabular-nums">（<span className={severityTone(highest(list))}>{severityLabels[highest(list)]}</span> {list.length}件）</span></span>)}
@@ -128,7 +132,6 @@ export function HomeView({ apps, appsChanged, projects, initialScan, toDiscover,
 
   return <>
     <header className="mb-8 max-md:mb-6">
-      <p className="mb-2 text-xs text-muted-foreground max-md:text-caption">ホーム</p>
       <h1 className="mb-2 text-title leading-[1.35] font-[650] tracking-[-.035em] max-lg:text-[25px] max-md:text-2xl">次にやること</h1>
       <p className="max-w-[640px] text-[13px] text-dim">重大な対応、止まっているチェック、続きのある探索の順に並べています。</p>
     </header>
@@ -137,7 +140,7 @@ export function HomeView({ apps, appsChanged, projects, initialScan, toDiscover,
       {leadWithWork ? <>{workRow}{checkRow}</> : <>{checkRow}{workRow}</>}
       {(undecidable.length > 0 || skipped > 0) && <Row icon={<CircleAlert size={18} className="text-muted-foreground" />} title="自動ではチェックしないアプリ"
         text={<span className="tabular-nums">
-          {undecidable.length > 0 && <span className="block">判定できる依存がない・読み取り失敗 {undecidable.length}件（lockなし等。脆弱性なしとは判定していません）</span>}
+          {undecidable.length > 0 && <span className="block">診断対象外 {undecidable.length}件（照会できる依存がない。lockなし・未対応の形式など。脆弱性なしとは判定していません）</span>}
           {skipped > 0 && <span className="block">フォルダが見つからない・除外フォルダにある {skipped}件</span>}
         </span>}
         action={<Button size="sm" onClick={toAttention}>確認する</Button>} />}

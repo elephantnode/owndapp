@@ -6,6 +6,10 @@ import type { Dependency, DependencyScope, DependencySnapshot, Ecosystem, Projec
 
 type Planned = { project: Project; contentId?: string; readAt: string; status: DependencySnapshot['status']; sendable: Dependency[]; notSent: Record<string, number> };
 
+/** Why a dependency stays local, or null when a check may send it. Also decides whether a project is diagnosable at all. */
+export const notSentReason = (d: Pick<Dependency, 'version' | 'ecosystem' | 'source'>) =>
+  !d.version ? 'no-version' : d.ecosystem === 'crates.io' && ['other-registry', 'registry-unrecorded', 'unknown'].includes(d.source) ? 'rust-source-unverified' : sendableSources.has(d.source) ? null : d.source;
+
 // Splits each project's recorded dependencies into what may be sent and what stays local, by reason.
 function plan(store: Store, ids: string[]) {
   const projects: Planned[] = []; const notRead: Project[] = [];
@@ -15,7 +19,7 @@ function plan(store: Store, ids: string[]) {
     if (!snapshot) { notRead.push(project); continue; }
     const notSent: Record<string, number> = {};
     const sendable = dependencies.filter(d => {
-      const reason = !d.version ? 'no-version' : d.ecosystem === 'crates.io' && ['other-registry', 'registry-unrecorded', 'unknown'].includes(d.source) ? 'rust-source-unverified' : sendableSources.has(d.source) ? null : d.source;
+      const reason = notSentReason(d);
       if (reason) notSent[reason] = (notSent[reason] || 0) + 1;
       return !reason;
     });
@@ -91,6 +95,7 @@ export async function check(store: Store, client: OsvClient, ids: string[],
         .map(advisory => continueIdentity(advisory, prior.get(key) ?? [], responded, matched, used));
       if (advisories.length) findings.push({ dependency, advisories, observedAt: now });
     }
+    // Any file left unread, unsupported formats included, keeps the check partial so it never resolves a finding.
     const status = failed || detailsMissing.size || dependencyStatus !== 'complete' ? 'partial' : 'complete';
     // Only a complete check clears anything. A partial one keeps every earlier advisory it did not see again: its query may have
     // failed, or a detail it could not fetch may have been needed to recognise it under another id.
@@ -172,5 +177,5 @@ export const advisoryCount = (check: VulnerabilityCheck) => new Set(check.findin
 
 export function summarize(check: VulnerabilityCheck, dependenciesReadAt: string | undefined, contentId?: string): VulnerabilitySummary {
   const highest = check.findings.flatMap(f => f.advisories.map(a => a.severity)).reduce<Severity | null>((a, b) => a ? higherSeverity(a, b) : b, null);
-  return { checkedAt: check.checkedAt, status: check.status, count: advisoryCount(check), highest, stale: check.snapshotContentId && contentId ? check.snapshotContentId !== contentId : dependenciesReadAt !== check.snapshotReadAt };
+  return { checkedAt: check.checkedAt, status: check.status, count: advisoryCount(check), highest, stale: check.snapshotContentId && contentId ? check.snapshotContentId !== contentId : dependenciesReadAt !== check.snapshotReadAt, queryFailed: check.failed > 0 || (check.detailsFailed ?? 0) > 0 };
 }

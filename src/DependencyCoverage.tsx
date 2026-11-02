@@ -10,16 +10,17 @@ import { Label } from '@/components/ui/label';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { cn } from '@/lib/utils';
+import { unreadable } from './attention';
 
 type Filter = 'unconfirmed' | 'unread' | 'unsupported' | 'problem' | 'no-lock' | 'all';
 const filterLabels: Record<Filter, string> = {
-  unconfirmed: '未確認のすべて', unread: '未読', unsupported: '未対応形式あり', problem: '読み取りの問題（一部・失敗）', 'no-lock': 'lockなし', all: 'すべて',
+  unconfirmed: '未確認のすべて', unread: '未読', unsupported: '未対応形式あり', problem: '読み取りの問題（未対応形式を除く）', 'no-lock': 'lockなし', all: 'すべて',
 };
 const statusLabels: Record<DependencyStatus, string> = { complete: '読み取り済み', partial: '一部を読み取れません', failed: '読み取れません', 'no-lock': 'lockなし' };
 const pageSize = 25;
 
 const unsupported = (p: Project) => (p.dependencyUnsupported ?? 0) > 0;
-const problem = (p: Project) => p.dependencyStatus === 'partial' || p.dependencyStatus === 'failed';
+const problem = unreadable;
 // complete only means one lock was read, so a project with unsupported files is still unconfirmed.
 const matches: Record<Filter, (p: Project) => boolean> = {
   unconfirmed: p => p.dependencyStatus !== 'complete' || unsupported(p),
@@ -74,10 +75,10 @@ export function DependencyCoverage({ projects, reading, onRead }: { projects: Pr
   }
 
   const scopeText = archived ? 'アーカイブを含む' : 'アーカイブを除く';
-  return <section aria-label="依存の検索範囲" className="mb-8 border-y py-5">
+  return <section aria-label="依存の検索範囲" className="mb-8 border-y py-4">
     <h2 className="mb-1 text-sm font-semibold">依存の検索範囲</h2>
     <p className="text-caption text-muted-foreground tabular-nums">
-      {scopeText}登録 {scope.length.toLocaleString()}件のうち、未読 {counts.unread.toLocaleString()}件、未対応形式あり {counts.unsupported.toLocaleString()}件、一部/読取失敗 {counts.problem.toLocaleString()}件、lockなし {counts.noLock.toLocaleString()}件。1件のアプリが複数に数えられることがあります。これらのアプリの依存は、検索結果に含まれないか一部だけです。
+      {scopeText}登録 {scope.length.toLocaleString()}件のうち、検索に含まれないか一部だけのもの：未読 {counts.unread.toLocaleString()}・未対応形式あり {counts.unsupported.toLocaleString()}・読み取りの問題 {counts.problem.toLocaleString()}・lockなし {counts.noLock.toLocaleString()}
     </p>
     <details className="mt-3 text-caption">
       <summary className="min-h-8 py-1.5">検索対象外・未確認のアプリを確認</summary>
