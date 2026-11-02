@@ -10,11 +10,22 @@ import type { Candidate, Component, Evidence, Scan } from '../shared/types.js';
 export const excluded = new Set(['.git', 'node_modules', 'vendor', '.venv', 'venv', '__pycache__',
   'dist', 'build', '.build', '.next', '.nuxt', 'target', '.terraform', '.aws-sam', 'cdk.out',
   '.serverless', '.owndapp', '.cache', '.pnpm-store', '.dart_tool', '.gradle', 'Pods', '.pytest_cache', '.mypy_cache', 'out', 'Carthage']);
-export const known = /^(package\.json|composer\.json|pyproject\.toml|Cargo\.toml|go\.mod|go\.work|requirements[^/]*\.txt|setup\.py|setup\.cfg|Pipfile|deno\.jsonc?|Gemfile|pom\.xml|build\.gradle(\.kts)?|Package\.swift|Dockerfile[^/]*|compose\.ya?ml|docker-compose[^/]*\.ya?ml|template\.ya?ml|template\.json|samconfig\.toml|serverless\.(ya?ml|json|ts)|cdk\.json|Pulumi\.ya?ml|vercel\.json|netlify\.toml|wrangler\.(toml|jsonc?)|firebase\.json|pnpm-workspace\.yaml|style\.css|pubspec\.yaml|\.clasp\.json|appsscript\.json|gapps\.config\.json)$/;
+export const known = /^(package\.json|composer\.json|pyproject\.toml|Cargo\.toml|go\.mod|go\.work|requirements[^/]*\.txt|setup\.py|setup\.cfg|Pipfile|deno\.jsonc?|Gemfile|pom\.xml|build\.gradle(\.kts)?|Package\.swift|Dockerfile[^/]*|compose\.ya?ml|docker-compose[^/]*\.ya?ml|template\.ya?ml|template\.json|sam-template\.(ya?ml|json)|template[-_][^/]*\.(ya?ml|json)|[^/]+\.template\.(ya?ml|json)|cloudformation[^/]*\.(ya?ml|json)|samconfig\.toml|amplify\.yml|sst\.config\.(ts|js|mjs)|tauri\.conf\.json|manifest\.json|Podfile|serverless\.(ya?ml|json|ts)|cdk\.json|Pulumi\.ya?ml|vercel\.json|netlify\.toml|wrangler\.(toml|jsonc?)|firebase\.json|pnpm-workspace\.yaml|style\.css|pubspec\.yaml|\.clasp\.json|appsscript\.json|gapps\.config\.json)$/;
 export const lockNames = /^(package-lock\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?|uv\.lock|poetry\.lock|Pipfile\.lock|composer\.lock|Cargo\.lock|deno\.lock)$/;
 // A boundary owns every detected folder below it, except nested Git repositories.
 // A Git repository with nothing but .git at its root is a container of separate apps, not a boundary.
-const boundaryTechnologies = new Set(['AWS SAM', 'AWS Lambda設定', 'AWS IaC', 'Flutter', 'Dart', 'WordPress', 'Google Apps Script', 'Docker']);
+const boundaryTechnologies = new Set(['AWS SAM', 'AWS Lambda設定', 'AWS IaC', 'Flutter', 'Dart', 'WordPress', 'WordPressプラグイン', 'Google Apps Script', 'Docker', 'Xcode']);
+/** Names detected by their extension: project files, Xcode bundles (folders) and PHP files that may carry a plugin header. */
+export const extraNames = /\.(csproj|tf|tf\.json|xcodeproj|xcworkspace|php)$/;
+/** Folders whose presence alone is read as a marker. */
+export const markerFolders = new Set(['amplify', '.chalice', 'templates']);
+// WordPress reads the plugin header from the first 8 KB of a PHP file at the plugin's root.
+const pluginFilesRead = 20;
+// package.json dependencies that name what the project is built with.
+const nodeFrameworks: Record<string, string> = { next: 'Next.js', vue: 'Vue', nuxt: 'Nuxt', react: 'React', svelte: 'Svelte', astro: 'Astro', '@angular/core': 'Angular',
+  electron: 'Electron', '@tauri-apps/api': 'Tauri', '@tauri-apps/cli': 'Tauri', remotion: 'Remotion', vite: 'Vite', express: 'Express', hono: 'Hono',
+  expo: 'Expo', 'react-native': 'React Native', sst: 'SST' };
+const pythonFrameworks: [RegExp, string][] = [[/^django\b/im, 'Django'], [/^flask\b/im, 'Flask'], [/^fastapi\b/im, 'FastAPI']];
 
 /** template_file / template from samconfig.toml (any environment section). Relative paths only. */
 function samTemplatePath(data: unknown): string | null {
@@ -120,7 +131,9 @@ export async function inspect(root: string, path: string, names: Set<string>, sc
   if (eligible) note('.git', 'Git管理の候補。詳細で remote・ブランチを読めます（変更の診断は未実装）');
   function add(tech: string, file: string, detail: string) { eligible = true; technologies.add(tech); note(file, detail); }
   for (const file of [...names].sort()) {
-    const manifest = known.test(file) || /\.(csproj|tf|tf\.json)$/.test(file);
+    if (/\.(xcodeproj|xcworkspace)$/.test(file)) { add('Xcode', file, file.endsWith('.xcodeproj') ? 'Xcodeプロジェクトあり。ビルドはしません' : 'Xcodeワークスペースあり'); continue; }
+    if (file.endsWith('.php')) continue;
+    const manifest = known.test(file) || extraNames.test(file);
     const isLock = lockNames.test(file);
     if (!manifest && !isLock) continue;
     try {
@@ -137,7 +150,7 @@ export async function inspect(root: string, path: string, names: Set<string>, sc
         if (typeof data.name === 'string' && data.name.trim()) name = data.name.slice(0, 200);
         add('Node.js系', file, 'package.jsonの存在。実行ランタイムは未確認');
         const deps = { ...object(data.devDependencies), ...object(data.dependencies) };
-        for (const [dependency, label] of Object.entries({ next: 'Next.js', vue: 'Vue', nuxt: 'Nuxt', react: 'React', svelte: 'Svelte', astro: 'Astro', '@angular/core': 'Angular' })) {
+        for (const [dependency, label] of Object.entries(nodeFrameworks)) {
           if (dependency in deps) add(label, file, `${dependency}の依存宣言あり。解決済み版は未確認`);
         }
         members.push(...strings(Array.isArray(data.workspaces) ? data.workspaces : object(data.workspaces).packages));
@@ -155,6 +168,10 @@ export async function inspect(root: string, path: string, names: Set<string>, sc
         const meta = object(file === 'Cargo.toml' ? data.package : data.project);
         if (typeof meta.name === 'string') name = meta.name.slice(0, 200);
         add(file === 'Cargo.toml' ? 'Rust' : 'Python', file, '静的なmanifest');
+        if (file === 'pyproject.toml') {
+          const declared = [...strings(meta.dependencies), ...Object.keys(object(object(object(data.tool).poetry).dependencies))].join('\n');
+          for (const [pattern, label] of pythonFrameworks) if (pattern.test(declared)) add(label, file, `${label}の依存宣言あり`);
+        }
         if (file === 'Cargo.toml') members.push(...strings(object(data.workspace).members));
       } else if (file === 'composer.json') {
         const data = object(JSON.parse(text));
@@ -171,7 +188,20 @@ export async function inspect(root: string, path: string, names: Set<string>, sc
           members.push(...block.split('\n').map(v => v.trim().replace(/\s*\/\/.*$/, '').replace(/^"|"$/g, '')).filter(Boolean));
           for (const match of text.matchAll(/^use\s+([^\s(]+)/gm)) members.push(match[1].replace(/^"|"$/g, ''));
         }
-      } else if (/^(requirements|setup\.|Pipfile)/.test(file)) add('Python', file, 'Pythonの構成ファイル。コードは実行しません');
+      } else if (/^(requirements|setup\.|Pipfile)/.test(file)) {
+        add('Python', file, 'Pythonの構成ファイル。コードは実行しません');
+        for (const [pattern, label] of pythonFrameworks) if (pattern.test(text.replace(/^\s*["']?/gm, ''))) add(label, file, `${label}の依存宣言あり`);
+      } else if (file === 'manifest.json') {
+        // Only manifests of a known kind make a project; a web app manifest under public/ does not.
+        const data = object(JSON.parse(text));
+        if (typeof data.manifest_version === 'number') add('Chrome拡張', file, `manifest_version ${data.manifest_version}`);
+        else if (typeof data.minAppVersion === 'string' && typeof data.id === 'string') add('Obsidianプラグイン', file, 'プラグインのマニフェスト');
+        else if (data.api_version !== undefined && names.has('templates')) add('Zendeskテーマ', file, 'テーマのマニフェストとtemplatesあり');
+        else note(file, 'manifest.jsonあり。種類は判定していません');
+      } else if (file === 'Podfile') add('CocoaPods', file, 'Podfileあり。pod installは実行しません');
+      else if (file === 'amplify.yml') add('AWS Amplify', file, 'ビルド設定あり。デプロイ先の実在は未確認');
+      else if (/^sst\.config\./.test(file)) add('SST', file, 'SSTの設定あり。コードは評価しません');
+      else if (file === 'tauri.conf.json') add('Tauri', file, 'Tauriの設定あり');
       else if (/^deno\./.test(file)) add('Deno', file, 'Denoの構成ファイル');
       else if (/^(Dockerfile|compose\.|docker-compose)/.test(file)) add('Docker', file, 'Docker設定あり。実行状況は未確認');
       else if (file === 'samconfig.toml') {
@@ -189,7 +219,7 @@ export async function inspect(root: string, path: string, names: Set<string>, sc
             else note(pointed, 'samconfigのtemplateを読んだが、SAM/Lambdaの型宣言は見つかりませんでした');
           } catch { note(pointed, 'samconfigのtemplateを読み取れません。パスや権限を確認してください'); }
         }
-      } else if (/^template\./.test(file)) {
+      } else if (/^template\./.test(file) || /^(sam-template\.|template[-_]|cloudformation)|\.template\./.test(file)) {
         // SAM/CloudFormation tags may be unknown to the data parser. Only literal type declarations are recognized.
         if (/AWS::(Serverless::Function|Lambda::Function)/.test(text)) {
           add('AWS Lambda設定', file, 'Lambdaの型宣言あり。クラウド上の実在は未確認');
@@ -205,7 +235,7 @@ export async function inspect(root: string, path: string, names: Set<string>, sc
       else if (file === 'netlify.toml') add('Netlify設定', file, '配置設定あり');
       else if (/^wrangler\./.test(file)) add('Cloudflare設定', file, '配置設定あり');
       else if (file === 'firebase.json') add('Firebase設定', file, 'サービス設定あり');
-      else if (file === 'Gemfile') add('Ruby', file, 'Gemfileあり。コードは評価しません');
+      else if (file === 'Gemfile') { add('Ruby', file, 'Gemfileあり。コードは評価しません'); if (/^\s*gem\s+['"]rails['"]/m.test(text)) add('Rails', file, 'railsの依存宣言あり'); }
       else if (file === 'pom.xml' || /^build\.gradle/.test(file)) add('Java/JVM', file, 'ビルド設定あり');
       else if (/\.csproj$/.test(file)) add('.NET', file, 'プロジェクトファイルあり');
       else if (file === 'Package.swift') add('Swift', file, 'Swift Packageの設定あり');
@@ -215,6 +245,18 @@ export async function inspect(root: string, path: string, names: Set<string>, sc
       note(file, '読み取りまたは解析に失敗。構成は未確認');
     }
   }
+  const phpFiles = [...names].filter(file => file.endsWith('.php')).sort().slice(0, pluginFilesRead);
+  if (!wordpressCore(names) && !names.has('wp-content')) for (const file of phpFiles) {
+    try {
+      const head = (await readSafe(root, join(path, file))).slice(0, 8192);
+      const plugin = head.match(/^[\s/*#@]*Plugin Name\s*:\s*(.+)$/im)?.[1]?.trim();
+      if (plugin) { add('WordPressプラグイン', file, 'プラグインの静的ヘッダー'); name = plugin.slice(0, 200); break; }
+    } catch { /* A PHP file that cannot be read is simply not a header. */ }
+  }
+  if (names.has('amplify')) for (const file of ['backend.ts', 'cli.json', 'team-provider-info.json']) {
+    if (await stat(join(path, 'amplify', file)).then(info => info.isFile(), () => false)) { add('AWS Amplify', `amplify/${file}`, 'Amplifyのバックエンド定義あり'); break; }
+  }
+  if (names.has('.chalice')) add('AWS Chalice', '.chalice', 'Chaliceの設定フォルダあり');
   if (wordpressCore(names)) add('WordPress', 'wp-includes', 'コア構造あり。設定の内容は読まず、wp-includes・wp-adminは探索しません');
   else if (names.has('wp-content')) add('WordPress', 'wp-content', 'wp-contentあり（WordPress本体なし）。バックアップやコンテンツの複製として1件にまとめます');
   else if (basename(path) !== 'wp-content' && content) add('WordPress', 'plugins', 'WordPressのpluginsあり。wp-contentの複製として1件にまとめます');

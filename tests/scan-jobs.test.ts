@@ -423,3 +423,51 @@ test('実行は1つずつで、削除は停止中の探索の保存分だけを�
     } finally { store.close(); }
   });
 });
+
+test('Xcode・WordPressプラグイン・拡張機能・AWSの別名テンプレート・フレームワークを、保存する探索と従来の探索で同じに検出する', async () => {
+  await fixture(async (root, put) => {
+    await mkdir(join(root, 'photo-app/PhotoApp.xcodeproj'), { recursive: true });
+    await put('photo-app/PhotoApp.xcodeproj/project.pbxproj', '// !$*UTF8*$!');
+    await put('photo-app/Podfile', "platform :ios, '17.0'\n");
+    await put('my-plugin/readme.txt', '=== My Plugin ===');
+    await put('my-plugin/my-plugin.php', '<?php\n/**\n * Plugin Name: 予約フォーム\n * Version: 1.0\n */\n');
+    await put('not-plugin/index.php', '<?php echo 1;');
+    await put('clip-ext/manifest.json', JSON.stringify({ manifest_version: 3, name: 'Clip' }));
+    await put('vault-tool/manifest.json', JSON.stringify({ id: 'vault-tool', minAppVersion: '1.5.0' }));
+    await put('help-theme/manifest.json', JSON.stringify({ name: 'Help', api_version: 4 }));
+    await put('help-theme/templates/home_page.hbs', '');
+    await put('site/public/manifest.json', JSON.stringify({ short_name: 'Site', start_url: '/' }));
+    await put('site/package.json', JSON.stringify({ name: 'site', dependencies: { hono: '4.0.0' }, devDependencies: { vite: '5.0.0' } }));
+    await put('billing/sam-template.yaml', 'Transform: AWS::Serverless-2016-10-31\nResources:\n  Fn:\n    Type: AWS::Serverless::Function\n');
+    await put('stack/network.template.json', '{"AWSTemplateFormatVersion":"2010-09-09"}');
+    await put('notes/template-email.json', '{"subject":"hi"}');
+    await put('web/amplify/backend.ts', 'export const backend = 1;');
+    await put('web/package.json', JSON.stringify({ name: 'web', dependencies: { react: '19.0.0' } }));
+    await put('chat/.chalice/config.json', '{}');
+    await put('chat/requirements.txt', 'chalice==1.31\nFastAPI>=0.110\n');
+    await put('shop/Gemfile', "source 'https://rubygems.org'\ngem 'rails', '~> 7.1'\n");
+    await put('films/package.json', JSON.stringify({ name: 'films', dependencies: { remotion: '4.0.0' } }));
+    const { store, jobs } = open(':memory:');
+    try {
+      const saved = await scan(jobs, root);
+      const old = await legacy(root);
+      assert.deepEqual(shape(saved.candidates), shape(old.candidates), 'the saved scan reads the same names as the in-memory one');
+      const tech = (folder: string) => saved.candidates.find(c => c.path.endsWith(`/${folder}`))?.technologies.sort();
+      assert.deepEqual(tech('photo-app'), ['CocoaPods', 'Xcode']);
+      assert.deepEqual(tech('my-plugin'), ['WordPressプラグイン']);
+      assert.equal(saved.candidates.find(c => c.path.endsWith('/my-plugin'))!.name, '予約フォーム');
+      assert.equal(tech('not-plugin'), undefined, 'a PHP file without a plugin header is not a project');
+      assert.deepEqual(tech('clip-ext'), ['Chrome拡張']);
+      assert.deepEqual(tech('vault-tool'), ['Obsidianプラグイン']);
+      assert.deepEqual(tech('help-theme'), ['Zendeskテーマ']);
+      assert.deepEqual(tech('site'), ['Hono', 'Node.js系', 'Vite'], 'a web app manifest under public/ adds nothing');
+      assert.deepEqual(tech('billing'), ['AWS Lambda設定', 'AWS SAM']);
+      assert.deepEqual(tech('stack'), ['AWS IaC']);
+      assert.equal(tech('notes'), undefined, 'a template-named file without AWS declarations is not a project');
+      assert.deepEqual(tech('web'), ['AWS Amplify', 'Node.js系', 'React']);
+      assert.deepEqual(tech('chat'), ['AWS Chalice', 'FastAPI', 'Python']);
+      assert.deepEqual(tech('shop'), ['Rails', 'Ruby']);
+      assert.deepEqual(tech('films'), ['Node.js系', 'Remotion']);
+    } finally { store.close(); }
+  });
+});
