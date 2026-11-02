@@ -114,7 +114,7 @@ async function setup(fn: (ctx: { root: string; store: Store; call: Call; ids: st
 test('照会前の確認では何も送らず、送る件数と送らない依存の理由を示す', async () => {
   await setup(async ({ call, ids, sent }) => {
     const { data } = await call('/vulnerabilities/preview', { ids });
-    assert.deepEqual(data, { destination: 'https://api.osv.dev', projects: 2, notRead: ['unread'], packageVersions: 4, byEcosystem: { npm: 4 }, notSent: { git: 1, file: 1 }, nothingToSend: [], reread: [] });
+    assert.deepEqual(data, { destination: 'https://api.osv.dev', projects: 2, notRead: ['unread'], packageVersions: 4, byEcosystem: { npm: 4 }, notSent: { git: 1, file: 1 }, nothingToSend: [], reread: [], scanner: null }, 'osv-scanner is off unless the user turns it on');
     assert.equal(sent.length, 0);
   });
 });

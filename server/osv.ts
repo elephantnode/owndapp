@@ -145,8 +145,15 @@ function samePackage(affected: OsvAffected, name: string, ecosystem: Ecosystem) 
  * The lowest fixed version of the range containing this version, from the advisory's own data.
  * null means the advisory names no fix for it, which is not the same as "no fix exists".
  */
+// Ecosystems whose versions compareVersions orders well enough to place a version inside a range.
+const comparable = new Set(['npm', 'Packagist', 'PyPI', 'crates.io', 'Go', 'RubyGems', 'Maven', 'NuGet', 'Pub', 'SwiftURL', 'Hex']);
 export function fixedVersion(record: OsvRecord, name: string, version: string, ecosystem: Ecosystem = 'npm') {
   const fixes: string[] = [];
+  // OS package versions (dpkg, apk, rpm) are not ordered here, so the advisory's first fixed version for the package is shown as given.
+  if (!comparable.has(ecosystem)) {
+    for (const affected of list(record.affected)) if (samePackage(affected, name, ecosystem)) for (const range of list(affected.ranges)) for (const event of list(range.events)) if (typeof event.fixed === 'string') return event.fixed;
+    return null;
+  }
   const compare = (a: string, b: string) => compareVersions(ecosystem, a, b);
   for (const affected of list(record.affected)) {
     if (!samePackage(affected, name, ecosystem)) continue;

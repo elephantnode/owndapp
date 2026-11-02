@@ -14,7 +14,9 @@ type DependencyRow = { project_id: string; ecosystem: Ecosystem; name: string; v
   scope: Dependency['scope']; source: Dependency['source']; file: string; component: string };
 const toDependency = ({ project_id: _, direct, ...row }: DependencyRow): Dependency => ({ ...row, direct: direct === 1 });
 
-const judged = (check: VulnerabilityCheck) => check.queried > 0 || check.failed > 0 || check.findings.length > 0;
+// A check judged something when owndapp queried (or tried to), osv-scanner covered a file or image, or it found anything.
+const judged = (check: VulnerabilityCheck) => check.queried > 0 || check.failed > 0 || check.findings.length > 0 ||
+  (check.scanner?.files.length ?? 0) > 0 || Object.keys(check.scanner?.images ?? {}).length > 0;
 
 // Archiving keeps the lifecycle it replaced, so leaving the archive can restore it.
 function rememberArchive(current: Project, next: Project) {
@@ -441,6 +443,25 @@ export class Store {
       FROM dependencies WHERE ${where} GROUP BY ecosystem, lower(name) ORDER BY projects DESC, lower(name), ecosystem LIMIT ?`).all(pattern, limit) as
       { ecosystem: Ecosystem; name: string; projects: number; directProjects: number; versions: string }[];
     return { total, packages: rows.map(row => ({ ...row, versions: (JSON.parse(row.versions) as (string | null)[]).filter((v): v is string => !!v) })) };
+  }
+  // osv-scanner is an optional helper the user turns on; off until then.
+  scannerEnabled() {
+    return (this.db.prepare("SELECT payload FROM settings WHERE key='scanner.enabled'").get() as { payload: string } | undefined)?.payload === 'true';
+  }
+  setScannerEnabled(on: boolean) {
+    this.db.prepare("INSERT INTO settings VALUES('scanner.enabled', ?) ON CONFLICT(key) DO UPDATE SET payload=excluded.payload").run(String(on));
+  }
+  /** Links local docker images to a project. Like refreshStructure, the revision is left alone so an open edit still saves. */
+  setImages(id: string, images: string[]) {
+    const current = this.project(id);
+    const next: Project = { ...current, images };
+    if (!images.length) delete next.images;
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      this.db.prepare('UPDATE projects SET payload=? WHERE id=?').run(JSON.stringify(next), id);
+      this.history(id, 'images_changed', { from: current.images ?? [], to: images });
+      this.db.exec('COMMIT'); return next;
+    } catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
   // Applications used to open project folders, one per role.
   apps(): OpenApps {

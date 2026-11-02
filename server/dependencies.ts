@@ -154,6 +154,8 @@ export async function readDependencies(project: Pick<Project, 'path' | 'componen
       { format: 'Gradle', names: names.filter(name => ['build.gradle', 'build.gradle.kts', 'gradle.lockfile'].includes(name)) },
       { format: 'NuGet', names: names.filter(name => ['packages.lock.json', 'packages.config'].includes(name) || name.endsWith('.csproj')) },
       { format: 'Bun / Deno', names: names.filter(name => ['bun.lock', 'bun.lockb', 'deno.lock'].includes(name)) },
+      { format: 'Dart (pubspec.lock)', names: names.filter(name => name === 'pubspec.lock') },
+      { format: 'Elixir (mix.lock)', names: names.filter(name => name === 'mix.lock') },
     ];
     for (const family of unsupported) for (const name of family.names) files.push({ path: posix.join(location, name), format: family.format, lockfileVersion: null, status: 'unsupported', message: `${family.format} の依存解析は未対応です。このファイルの依存は検索・脆弱性照会の対象に含まれていません。`, hashes: {} });
   }
