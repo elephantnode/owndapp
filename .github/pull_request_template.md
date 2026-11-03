@@ -30,4 +30,4 @@ Windowsに関わる変更の場合（該当しなければ削除）:
 
 ## ドキュメント
 
-- [ ] 必要に応じて更新した（利用者向け: README・docs/usage.md など／実装範囲: docs/features.md／課題: docs/roadmap.md／開発: docs/development.md）
+- [ ] 必要に応じて更新した（利用者向け: README・docs/manual/ は操作や画面が変わったときだけ／仕様: docs/reference/／課題: docs/design/roadmap.md）

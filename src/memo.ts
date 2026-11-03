@@ -1,5 +1,5 @@
 import { compareVersions } from '../shared/semver';
-import { ecosystemLabels, exposureLabels, lifecycleLabels, priorityLabels, responseLabels, type Dependency, type Project, type QueueItem, type Severity } from '../shared/types';
+import { ecosystemLabel, exposureLabels, lifecycleLabels, priorityLabels, responseLabels, type Dependency, type Project, type QueueItem, type Severity } from '../shared/types';
 import { priorityRank, severityRank, priorityOf, priorityReasons, compareQueueItems } from '../shared/priority';
 
 const severityText: Record<Severity, string> = { malicious: '悪意のあるパッケージ', critical: '緊急', high: '高', moderate: '中', low: '低', unknown: '重大度不明' };
@@ -24,7 +24,20 @@ function whyCommand(d: Dependency) {
   return /yarn\.lock$/.test(d.file) ? `yarn why ${d.name}` : /pnpm-lock\.yaml$/.test(d.file) ? `pnpm why ${d.name}` : `npm ls ${d.name}`;
 }
 // npm keeps "name@version" as the heading; other ecosystems name themselves, since the same name may exist in several.
-const packageKey = (d: Dependency) => `${d.ecosystem && d.ecosystem !== 'npm' ? `${ecosystemLabels[d.ecosystem]}: ` : ''}${d.name}@${d.version}`;
+const packageKey = (d: Dependency) => `${d.ecosystem && d.ecosystem !== 'npm' ? `${ecosystemLabel(d.ecosystem)}: ` : ''}${d.name}@${d.version}`;
+// What osv-scanner read: the manifest that declares the package, and how to see what pulls it in.
+const scannerFormats: Record<string, [string, string]> = {
+  'pubspec.lock': ['pubspec.yaml', 'dart pub deps'], 'Package.resolved': ['Package.swift', 'swift package show-dependencies'],
+  'packages.lock.json': ['.csproj', 'dotnet list package --include-transitive'], 'packages.config': ['packages.config', 'dotnet list package --include-transitive'],
+  'mix.lock': ['mix.exs', 'mix deps.tree'], 'gradle.lockfile': ['build.gradle', 'gradle dependencies'], 'bun.lock': ['package.json', 'bun pm ls --all'],
+};
+function scannerAdvice(d: Dependency, target: string | undefined) {
+  const to = target ? `${target} 以上` : '修正済みの版';
+  if (d.via?.image) return `対応案: イメージ \`${d.via.image}\` の中のパッケージ（osv-scannerが検出）。ベースイメージを新しい版にするか、Dockerfileで \`${d.name}\` を${to}に更新してイメージを作り直す。`;
+  const file = (d.via?.file ?? d.file).split('/').pop() ?? '';
+  const [manifest, why] = scannerFormats[file] ?? (/\.csproj$/.test(file) ? [file, 'dotnet list package --include-transitive'] : [file, '']);
+  return `対応案: ${d.via?.file ?? d.file}（osv-scannerが検出。直接・間接の区別は未記録）。直接の依存なら ${manifest} の \`${d.name}\` を${to}に更新する。間接の依存なら親パッケージの更新が必要な可能性がある${why ? `（\`${why}\` で確認）` : ''}。`;
+}
 
 /**
  * A fix memo for one project, to hand to Claude Code or a person: what to update, to which version, and how to verify.
@@ -80,14 +93,14 @@ export function buildMemo(project: Project, items: QueueItem[], checkedAt: strin
       if (!item.advisory.detailsAvailable) lines.push('  - 詳細情報を取得できていません。解消確認はできません。');
     }
     const target = s.fixes.at(-1);
-    lines.push('', s.dependency.direct
+    lines.push('', s.dependency.via ? scannerAdvice(s.dependency, target) : s.dependency.direct
       ? `対応案: ${manifestOf(s.dependency)} の \`${s.dependency.name}\` を ${target ? `${target} 以上（上のすべての修正版を満たす版）` : '修正済みの版'}に更新する。${s.dependency.requested ? `今の宣言は \`${s.dependency.requested}\`。` : ''}`
       : `対応案: 間接依存のため、この版を引き込んでいる親パッケージの更新が必要な可能性がある（経路は未記録。\`${whyCommand(s.dependency)}\` で確認）。${target ? `${target} 以上になればよい。` : ''}`, '');
   }
   lines.push(
     '## 進め方',
     '',
-    '- 対象プロジェクトの依存ルールを確認する。owndapp の `docs/dependency-policy.md` と同じく、lockの更新・脆弱性の検査・取得と署名の検証・ビルドを分けて行う。',
+    '- 対象プロジェクトの依存ルールを確認する。owndapp の `docs/reference/dependency-policy.md` と同じく、lockの更新・脆弱性の検査・取得と署名の検証・ビルドを分けて行う。',
     '- `npm audit fix --force` やライフサイクルスクリプト（Composer の scripts なども含む）の一括有効化で済ませない。メジャー更新は互換性を確認する。',
     '- 更新後はテスト・ビルド・動作確認を行い、owndapp で依存を読み直して脆弱性を再照会し、解消を確認する。',
     '- このメモは既知の脆弱性（OSV登録済み）だけが対象。実際に悪用できるか、未公開の問題がないかは判定していない。',

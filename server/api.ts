@@ -11,10 +11,11 @@ import { dependencyStatusOf, filesChanged, readDependencies as readLockfiles, un
 import { readGit } from './git.js';
 import { suggestPurpose } from './readme.js';
 import { osvApi, type OsvClient, type RunOptions } from './osv.js';
-import { check as checkVulnerabilities, notSentReason, preview as previewVulnerabilities, snapshots as vulnerabilitySnapshots, summarize, type CheckPhase } from './vulnerabilities.js';
+import { detectTools, imageReference, listImages, scanImage, scanLockfile, ScannerError, type ScannerRunner } from './osv-scanner.js';
+import { check as checkVulnerabilities, notSentReason, preview as previewVulnerabilities, scannerFiles, snapshots as vulnerabilitySnapshots, summarize, type CheckPhase, type ScannerHooks } from './vulnerabilities.js';
 import { priorityOf, priorityReasons, severityRank } from '../shared/priority.js';
 import { chooseApplication, chooseFolder, openInFinder, openWithApp, type AppOpener, type AppPicker, type FolderOpener, type FolderPicker } from './folder-picker.js';
-import { appRoleLabels, readFileStatuses, type Advisory, type AppRole, type Candidate, type Dependency, type DependencySnapshot, type Exposure, type GitStatus, type Lifecycle, type ProjectEdit, type QueueItem, type ResponseRecord, type ResponseStatus, type Scan } from '../shared/types.js';
+import { appRoleLabels, readFileStatuses, type Advisory, type AppRole, type Candidate, type Dependency, type DependencySnapshot, type Exposure, type GitStatus, type Lifecycle, type Project, type ProjectEdit, type QueueItem, type ResponseRecord, type ResponseStatus, type Scan } from '../shared/types.js';
 
 const bulkLimit = 1000; // 1000 ids stay within the 64KB request limit.
 
@@ -22,7 +23,8 @@ export type VulnerabilityJob = { id: string; status: 'running' | 'done' | 'faile
   projects: number; read: number; startedAt: string; finishedAt?: string; result?: Awaited<ReturnType<typeof checkVulnerabilities>>; error?: string };
 
 export function createApi(store: Store, port = 4310, pickFolder: FolderPicker = chooseFolder, openFolder: FolderOpener = openInFinder,
-  { pickApp = chooseApplication, openApp = openWithApp, osv = osvApi, osvOptions = {}, platform = process.platform }: { pickApp?: AppPicker; openApp?: AppOpener; osv?: OsvClient; osvOptions?: RunOptions; platform?: NodeJS.Platform } = {}) {
+  { pickApp = chooseApplication, openApp = openWithApp, osv = osvApi, osvOptions = {}, platform = process.platform, scannerRunner, findTool }: { pickApp?: AppPicker; openApp?: AppOpener; osv?: OsvClient; osvOptions?: RunOptions; platform?: NodeJS.Platform;
+    scannerRunner?: ScannerRunner; findTool?: (name: string) => Promise<string | null> } = {}) {
   const nativeDesktop = platform === 'darwin';
   const capabilities = { platform, folderPicker: nativeDesktop || platform === 'win32', revealFolder: nativeDesktop, externalApps: nativeDesktop || platform === 'win32' };
   const requireDesktop = () => { if (!nativeDesktop) throw new CatalogError('このOSではフォルダ選択・外部アプリ起動は利用できません。フォルダはパスを直接入力してください', 501); };
@@ -68,12 +70,15 @@ export function createApi(store: Store, port = 4310, pickFolder: FolderPicker = 
     const checks = store.vulnerabilityChecks();
     const git = store.gitObservations();
     const diagnosable = new Set(store.dependencyKinds().filter(kind => !notSentReason(kind)).map(kind => kind.projectId));
+    // With osv-scanner on, a lockfile it reads or a linked image makes a project diagnosable too.
+    const scannerOn = store.scannerEnabled();
+    const scannable = (project: Project, snapshot?: DependencySnapshot) => scannerOn && (!!project.images?.length || (!!snapshot && scannerFiles(snapshot.files).length > 0));
     return c.json({ projects: projects.map((project, i) => {
       const snapshot = snapshots.get(project.id); const check = checks.get(project.id); const observation = git.get(project.id);
       // Recompute so older catalogs that marked "lockなし" as partial stop counting as read failures.
       const dependencyStatus = snapshot ? dependencyStatusOf(snapshot.files) : undefined;
       return { ...project, missing: flags[i], excluded: !!isExcluded(exclusions, project.path), dependencyStatus, dependencyUnsupported: snapshot?.files.filter(file => file.status === 'unsupported').length ?? 0, dependencyUnreadable: snapshot ? unreadableFiles(snapshot.files).length : 0, dependenciesReadAt: snapshot?.readAt,
-        diagnosable: snapshot ? diagnosable.has(project.id) : undefined,
+        diagnosable: snapshot ? diagnosable.has(project.id) || scannable(project, snapshot) : scannable(project) || undefined,
         gitStatus: observation?.status, gitReadAt: observation?.readAt,
         gitRemoteCount: observation?.status === 'ok' ? observation.remotes.length : undefined,
         gitBranch: observation?.status === 'ok' ? observation.branch : undefined,
@@ -235,7 +240,44 @@ export function createApi(store: Store, port = 4310, pickFolder: FolderPicker = 
     return [...new Set(input.ids)];
   };
   // Nothing is sent here: this only counts what a check would send.
-  app.post('/api/vulnerabilities/preview', async c => c.json(previewVulnerabilities(store, await vulnerabilityIds(c))));
+  // osv-scanner, and docker for images, only when found and turned on. Found again for each use, since either may be installed or started later.
+  const tools = () => detectTools(scannerRunner, findTool);
+  const scannerHooks = async (): Promise<ScannerHooks | undefined> => {
+    if (!store.scannerEnabled()) return undefined;
+    const found = await tools();
+    const scanner = found.osvScanner?.path;
+    if (!scanner) return undefined;
+    return {
+      lockfile: (project, file) => scanLockfile(scanner, project.path, file, { runner: scannerRunner }),
+      image: async reference => {
+        if (!found.docker?.running) throw new ScannerError('Dockerが起動していないため、イメージを確認できません');
+        return scanImage({ osvScanner: scanner, docker: found.docker.path }, reference, { runner: scannerRunner });
+      },
+    };
+  };
+  app.get('/api/scanner', async c => c.json({ enabled: store.scannerEnabled(), tools: await tools() }));
+  app.put('/api/scanner', async c => {
+    const input = await c.req.json<{ enabled: unknown }>();
+    if (typeof input.enabled !== 'boolean') throw new CatalogError('osv-scannerを使うかどうかを選んでください');
+    store.setScannerEnabled(input.enabled);
+    return c.json({ enabled: store.scannerEnabled(), tools: await tools() });
+  });
+  // Local images only, read with docker image ls. Nothing is pulled.
+  app.get('/api/docker/images', async c => {
+    const found = await tools();
+    if (!found.docker) throw new CatalogError('Dockerが見つかりません', 404);
+    if (!found.docker.running) throw new CatalogError('Dockerが起動していません。起動してから読み込み直してください', 409);
+    return c.json({ images: await listImages(found.docker.path, scannerRunner) });
+  });
+  app.put('/api/projects/:id/images', async c => {
+    const input = await c.req.json<{ images: unknown }>();
+    if (!Array.isArray(input.images) || input.images.length > 20 || input.images.some(image => typeof image !== 'string' || !imageReference.test(image))) throw new CatalogError('イメージは名前:タグの形で20件まで選べます');
+    return c.json({ project: store.setImages(c.req.param('id'), [...new Set(input.images as string[])]) });
+  });
+  app.post('/api/vulnerabilities/preview', async c => {
+    const ids = await vulnerabilityIds(c);
+    return c.json(previewVulnerabilities(store, ids, !!(await scannerHooks())));
+  });
   // Always refresh dependencies before querying, even when recorded file hashes match.
   // The screen follows reading and querying through /api/vulnerabilities/job.
   let job: VulnerabilityJob | null = null;
@@ -252,7 +294,7 @@ export function createApi(store: Store, port = 4310, pickFolder: FolderPicker = 
         if (status !== 'missing') current.read++;
         current.done++;
       }
-      const result = await checkVulnerabilities(store, osv, ids, { ...osvOptions, onProgress: (phase, done, total) => Object.assign(current, { phase, done, total }) });
+      const result = await checkVulnerabilities(store, osv, ids, { ...osvOptions, scanner: await scannerHooks(), onProgress: (phase, done, total) => Object.assign(current, { phase, done, total }) });
       if (result.queried === 0 && result.failed > 0) Object.assign(current, { status: 'failed', error: 'OSVに接続できませんでした。ネットワークを確認してください。前回の結果は残しています' });
       else Object.assign(current, { status: 'done', result });
     } catch { Object.assign(current, { status: 'failed', error: '照会を完了できませんでした。前回の結果は残しています' }); }
@@ -494,7 +536,11 @@ export function createApi(store: Store, port = 4310, pickFolder: FolderPicker = 
   const findScan = (id: string) => jobs.get(id, { limit: 0, exclusions: store.exclusions() }) ?? store.scan(id);
   const launchScan = (id: string) => {
     const controller = new AbortController(); controllers.set(id, controller);
-    const task = jobs.run(id, controller.signal).finally(() => { controllers.delete(id); scanTasks.delete(id); });
+    const task = jobs.run(id, controller.signal).then(() => {
+      // A finished scan also refreshes what registered projects are made of, so improved detection reaches them.
+      const scan = jobs.get(id, { limit: 0 });
+      if (scan && (scan.status === 'completed' || scan.status === 'partial')) store.refreshStructure(jobs.registeredCandidates(id));
+    }).finally(() => { controllers.delete(id); scanTasks.delete(id); });
     scanTasks.set(id, task); void task.catch(() => {});
   };
   const requireStopped = () => {

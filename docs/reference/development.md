@@ -1,6 +1,6 @@
 # 開発者向け資料
 
-利用するための導入手順は[はじめる](getting-started.md)、開発課題は[開発課題と未対応項目](roadmap.md)を参照してください。
+利用するための導入手順は[はじめる](getting-started.md)、開発課題は[開発課題と未対応項目](../design/roadmap.md)を参照してください。
 
 ## 検証する
 
@@ -12,7 +12,7 @@ npm run test:e2e
 
 ブラウザ検証はインストール済みのGoogle Chromeを使う。テストは一時フォルダに生成したサンプルと別のSQLiteを使用し、実用カタログを変更しない。テスト用サーバーには4317番ポートを使用する。
 
-[検証記録](verification.md)と[画面のスクリーンショット](screenshots/README.md)を参照。スクリーンショットのプロジェクトはすべてサンプル。
+[検証記録](verification.md)と[画面のスクリーンショット](../screenshots/README.md)を参照。スクリーンショットのプロジェクトはすべてサンプル。
 
 ## 画面の技術構成
 
@@ -38,9 +38,9 @@ React・TypeScript・Vite。部品は [shadcn/ui](https://ui.shadcn.com) の形�
 ## 設計・方針・検証記録
 
 - [実装済みの機能と対応範囲](features.md)
-- [全体構成](product-plan.md)・[検出・診断の予定対応表](detection-matrix.md)
-- [画面設計](wireframes.md)・[ナビゲーション](navigation-plan.md)
-- [データモデル案](data-model.md)・[探索の設計](discovery-plan.md)
+- [全体構成](../design/product-plan.md)・[検出・診断の予定対応表](detection-matrix.md)
+- [画面設計](../design/wireframes.md)・[ナビゲーション](../design/navigation-plan.md)
+- [データモデル案](data-model.md)・[探索の設計](../design/discovery-plan.md)
 - [npm依存管理方針](dependency-policy.md)
 - [重大度と優先度](severity-policy.md)・[プロジェクトの対応状況](project-response.md)
 - [初版の検証記録](verification.md)・[新規導入の検証記録](install-verification.md)
@@ -70,7 +70,7 @@ Radix UIとLucideのMODULE_LEVEL_DIRECTIVE（use client）は、RSCを使わな�
 
 `.github/workflows/ci.yml`はcontents:read、checkoutの認証情報保存なし、公式ActionのコミットSHA固定で用意する。macOSではlockのaudit→スクリプトを無効にしたci→署名検証→単体/API→ビルド→Chromeのブラウザ操作を実行する。Windows experimentalはbuild/doctorとWindows向けの限定したfixtureテストで、全テストや手動の実機受け入れを代替しない。GitHub上で実行するまではCI成功と扱わない。
 
-npm公開は行わないためpackage.jsonのprivate:trueを維持する。MITはownコードへ適用し、バンドルした依存の表示はbuildで生成するdist/third-party-licenses.mdを同梱する。公開準備・残る判断は[公開準備](release-readiness.md)を参照。
+npm公開は行わないためpackage.jsonのprivate:trueを維持する。MITはownコードへ適用し、バンドルした依存の表示はbuildで生成するdist/third-party-licenses.mdを同梱する。公開準備・残る判断は[公開準備](../design/release-readiness.md)を参照。
 
 
 ## Windowsのフォルダ選択（2026-10-27）

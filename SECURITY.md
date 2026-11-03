@@ -18,6 +18,8 @@ GitHubの[Security Advisories](https://github.com/elephantnode/owndapp/security/
 
 ## 対応する版と範囲
 
-現在は初期開発段階で、最新のmainブランチを対象に修正を検討します。過去版へのバックポート、回答期限、修正期限は保証していません。Windows対応は試験的で、フォルダ選択・パス入力・対応アプリ起動を含みます。実機の検証状況は[Windows向け手順](docs/windows.md)を参照してください。
+現在は初期開発段階で、最新のmainブランチを対象に修正を検討します。過去版へのバックポート、回答期限、修正期限は保証していません。Windows対応は試験的で、フォルダ選択・パス入力・対応アプリ起動を含みます。実機の検証状況は[Windows向け手順](docs/reference/windows.md)を参照してください。
 
 owndappはローカルのループバック接続で使うツールです。外部ネットワークへの公開や複数ユーザーでの共有サービスとしての運用は想定していません。検査対象のスクリプトを自動実行せず、依存の読み取りと外部への脆弱性照会を区別します。
+
+任意で osv-scanner を使う設定にした場合だけ、この端末の `osv-scanner` と `docker` をシェルを通さずに実行します。実行するのは `osv-scanner scan source`（lockファイルを1件ずつ指定）、`osv-scanner scan image --archive`、`docker image ls`・`image inspect`・`image save` です。`osv-scanner fix`、呼び出し解析（Rustはビルドスクリプトを実行するため）、Mavenの推移的な依存の解決（deps.devへの問い合わせ）、イメージの取得（pull）は行いません。書き出したイメージは権限を限定した一時フォルダに置き、終わったら削除します。

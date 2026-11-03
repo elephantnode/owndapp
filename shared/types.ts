@@ -45,8 +45,10 @@ export interface Project extends Candidate {
   /** From the latest dependency snapshot, added on catalog reads. Absent when dependencies were never read. */
   dependencyStatus?: DependencyStatus;
   dependenciesReadAt?: string;
-  /** True when the latest dependency read found a dependency a vulnerability check can send. Absent when dependencies were never read. */
+  /** True when the latest dependency read found a dependency a vulnerability check can send, or osv-scanner can check a lockfile or image of it. Absent when dependencies were never read. */
   diagnosable?: boolean;
+  /** Local docker images the user linked to this project, checked with osv-scanner. */
+  images?: string[];
   /** Number of known dependency files whose format could not be inspected. */
   dependencyUnsupported?: number;
   /** Number of dependency files in a supported format that could not be read (invalid, unreadable, too large). */
@@ -97,6 +99,9 @@ export type DependencySource = 'registry' | 'other-registry' | 'registry-unrecor
 /** OSV ecosystem names. npm covers npm, Yarn, and pnpm lockfiles; Packagist is Composer; PyPI is Python; RubyGems is Bundler. */
 export type Ecosystem = 'npm' | 'Packagist' | 'PyPI' | 'crates.io' | 'Go' | 'RubyGems' | 'Maven';
 export const ecosystemLabels: Record<Ecosystem, string> = { npm: 'npm', Packagist: 'Composer', PyPI: 'Python', 'crates.io': 'Rust', Go: 'Go', RubyGems: 'Ruby', Maven: 'Maven' };
+// Findings from osv-scanner may name ecosystems owndapp does not read itself. OS packages (Debian:12, Alpine:v3.20...) are shown as given.
+const scannerEcosystemLabels: Record<string, string> = { Pub: 'Dart', NuGet: '.NET', SwiftURL: 'Swift', Hex: 'Elixir' };
+export const ecosystemLabel = (ecosystem: string) => ecosystemLabels[ecosystem as Ecosystem] ?? scannerEcosystemLabels[ecosystem] ?? ecosystem;
 export interface Dependency {
   ecosystem: Ecosystem;
   name: string;
@@ -111,6 +116,8 @@ export interface Dependency {
   file: string;
   /** Folder relative to the project that the dependency belongs to. '' is the project itself or a hoisted dependency. */
   component: string;
+  /** Set on dependencies osv-scanner found, which record neither direct/indirect nor scope. */
+  via?: FindingVia;
 }
 /**
  * unpinned: a requirements file or pom.xml was read, but some entries name no exact version.
@@ -170,11 +177,15 @@ export interface Advisory {
   /** false when only the id could be fetched. */
   detailsAvailable: boolean;
 }
+/** Where osv-scanner found a package: a lockfile owndapp does not parse, or a local docker image. Absent for owndapp's own reading. */
+export interface FindingVia { tool: 'osv-scanner'; file?: string; image?: string; imageId?: string }
 export interface VulnerabilityFinding {
   retained?: boolean;
   observedAt?: string;
+  /** For osv-scanner findings, dependency.ecosystem is the ecosystem it reported, which may be outside Ecosystem (Pub, NuGet, Debian:12...). */
   dependency: Dependency;
   advisories: Advisory[];
+  via?: FindingVia;
 }
 /** complete: every sendable package version and reported advisory detail was answered. partial: queries or details were unavailable. */
 export type VulnerabilityCheckStatus = 'complete' | 'partial';
@@ -193,6 +204,8 @@ export interface VulnerabilityCheck {
   /** Dependencies not sent, by reason: git / url / file / unknown source, or no resolved version (including unpinned requirements). */
   notSent: Record<string, number>;
   findings: VulnerabilityFinding[];
+  /** What osv-scanner covered: lockfiles by path, images by reference with the image id checked, and what it could not check with why. */
+  scanner?: { files: string[]; images: Record<string, string>; failed: { target: string; message: string }[] };
 }
 /** Per project summary added on catalog reads. */
 export interface VulnerabilitySummary { checkedAt: string; status: VulnerabilityCheckStatus; count: number; highest: Severity | null; stale: boolean;

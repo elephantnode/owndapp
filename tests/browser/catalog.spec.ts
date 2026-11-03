@@ -808,8 +808,9 @@ test('ホームで次の作業と取得失敗を区別し、使い方とフォ�
   await nav.getByRole('link', { name: '設定・使い方', exact: true }).click();
   const guide = page.getByRole('region', { name: '使い方', exact: true });
   await expect(guide.getByRole('heading', { level: 3 })).toHaveCount(6);
-  await guide.getByText('インストールと更新', { exact: true }).click();
+  await guide.getByText('インストール・更新・アンインストール', { exact: true }).click();
   await expect(guide).toContainText('npm ci --ignore-scripts');
+  await expect(guide.getByRole('heading', { name: 'アンインストールする' })).toBeVisible();
   await page.getByRole('button', { name: '探索・除外フォルダを管理' }).click();
   await expect(page.getByRole('heading', { name: 'アプリを追加', level: 1, exact: true })).toBeVisible();
   expect(errors).toEqual([]);
@@ -1229,4 +1230,19 @@ test('進捗と完了通知はスクロールしても画面上部中央に表�
   await expect(notifications.getByRole('status')).toBeInViewport();
   await notifications.getByRole('button', { name: '通知を閉じる', exact: true }).click();
   await expect(notifications.getByRole('status')).toHaveCount(0);
+});
+
+test('設定にosv-scannerの有無と使うかどうかを出し、詳細でイメージを結び付けられる場所を示す', async ({ page }) => {
+  await page.goto('/#settings');
+  const section = page.getByRole('region', { name: 'osv-scanner（任意）' });
+  await expect(section).toContainText(/バージョン|見つかりません/);
+  // Off until the user turns it on; the browser tests never run the real tool.
+  await expect(section.getByRole('checkbox', { name: 'osv-scannerを使う' })).not.toBeChecked();
+  await section.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: 'docs/screenshots/settings-osv-scanner.png', animations: 'disabled' });
+  await page.goto('/#catalog');
+  await page.getByRole('row').getByRole('link').first().click();
+  const images = page.getByRole('region', { name: 'コンテナイメージ' });
+  await expect(images).toContainText('取得はしません');
+  await expect(images.getByRole('button', { name: '手元のイメージから選ぶ' })).toBeVisible();
 });

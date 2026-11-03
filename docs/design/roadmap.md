@@ -1,11 +1,11 @@
 # 開発課題と未対応項目
 
-更新日: 2026-10-27。利用者向けの導入・操作は[README](../README.md)、現在の詳しい対応範囲は[実装済み機能](features.md)を参照してください。この一覧は課題の整理で、すべての実装や公開時期を約束するものではありません。
+更新日: 2026-10-27。利用者向けの導入・操作は[README](../../README.md)、現在の詳しい対応範囲は[実装済み機能](../reference/features.md)を参照してください。この一覧は課題の整理で、すべての実装や公開時期を約束するものではありません。
 
 ## 公開まわり（2026-10-27完了）
 
 - MITライセンス。配布先は `https://github.com/elephantnode/owndapp`。
-- Private vulnerability reportingを有効化し、[SECURITY.md](../SECURITY.md)を更新済み。
+- Private vulnerability reportingを有効化し、[SECURITY.md](../../SECURITY.md)を更新済み。
 - 公開用mainのCI（macOSとWindows experimental）成功、GitHubからの新規取得、[v0.1.0](https://github.com/elephantnode/owndapp/releases/tag/v0.1.0)を公開済み。詳細は[公開準備](release-readiness.md)。
 - Windowsは試験的対応のまま公開した。実機受け入れは公開後の課題とし、完了前に「Windows対応完了」とは扱わない。
 
@@ -26,7 +26,7 @@
 
 - 導入検証はmacOS / Apple Siliconで実施。Intel Mac、他OS、全Node.js版の確認は未完了。
 - 公開配布URLからの新規取得（clone → build → start）は2026-10-27に確認。Finderの実ダイアログ操作は未確認。
-- 署名検証でのTUF鍵取得の警告と直接取得へのフォールバックは、[導入検証記録](install-verification.md)を参照。
+- 署名検証でのTUF鍵取得の警告と直接取得へのフォールバックは、[導入検証記録](../reference/install-verification.md)を参照。
 
 日付や対象コミットの異なる検証結果は、現在の全環境での動作や安全性の保証として扱わない。
 
@@ -35,4 +35,4 @@
 
 パス直接入力に加え、Windows標準のフォルダ選択と対応する.exeの登録・起動を実装した。Finder表示はmacOS専用。直接入力は代替手段として維持する。既存のmacOS機能は維持する。
 
-Windows実機での新規導入・ビルド・起動・停止/再起動、標準ダイアログの表示、ドライブ文字・UNC共有・長いパス、ACL・ジャンクション、SQLiteの保存と復旧、Guardの設定書き込みとレジストリ検査、アプリ選択・起動・再起動後の保存は未検証。実機受け入れ前にWindows対応完了とは扱わない。詳細は[Windows手順](windows.md)。
+Windows実機での新規導入・ビルド・起動・停止/再起動、標準ダイアログの表示、ドライブ文字・UNC共有・長いパス、ACL・ジャンクション、SQLiteの保存と復旧、Guardの設定書き込みとレジストリ検査、アプリ選択・起動・再起動後の保存は未検証。実機受け入れ前にWindows対応完了とは扱わない。詳細は[Windows手順](../reference/windows.md)。

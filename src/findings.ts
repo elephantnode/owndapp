@@ -1,6 +1,6 @@
 import { compareVersions } from '../shared/semver';
 import { severityRank } from '../shared/priority';
-import type { Advisory, Dependency, Severity, VulnerabilityFinding } from '../shared/types';
+import type { Advisory, Dependency, FindingVia, Severity, VulnerabilityFinding } from '../shared/types';
 
 /** Advisories for one dependency version: the fix is one upgrade, so the detail page lists them together. */
 export interface FindingGroup {
@@ -11,6 +11,8 @@ export interface FindingGroup {
   fixed: string | null;
   /** Advisories that name no fixed version, so the upgrade above may not cover them. */
   withoutFix: number;
+  /** Found by osv-scanner in this lockfile or image. */
+  via?: FindingVia;
 }
 
 // Most severe group first, then the one with more advisories; advisories inside a group the same way.
@@ -18,8 +20,9 @@ export function groupFindings(findings: VulnerabilityFinding[]): FindingGroup[] 
   const byVersion = new Map<string, VulnerabilityFinding>();
   for (const finding of findings) {
     const d = finding.dependency;
-    const key = JSON.stringify([d.ecosystem, d.name, d.version]);
-    const group = byVersion.get(key) ?? { dependency: d, advisories: [] };
+    // The same version found in an image is a separate upgrade from the one in the project's lockfile.
+    const key = JSON.stringify([d.ecosystem, d.name, d.version, finding.via?.image ?? '']);
+    const group = byVersion.get(key) ?? { dependency: d, advisories: [], via: finding.via };
     for (const a of finding.advisories) {
       const advisory = finding.retained ? { ...a, severityRetained: true } : a;
       const existing = group.advisories.findIndex(previous => previous.id === a.id);
@@ -31,7 +34,7 @@ export function groupFindings(findings: VulnerabilityFinding[]): FindingGroup[] 
   return [...byVersion.values()].filter(f => f.advisories.length).map(f => {
     const advisories = [...f.advisories].sort((a, b) => severityRank[b.severity] - severityRank[a.severity]);
     const fixes = advisories.flatMap(a => a.fixed ? [a.fixed] : []).sort((a, b) => compareVersions(f.dependency.ecosystem, a, b));
-    return { dependency: f.dependency, advisories, highest: advisories[0].severity, fixed: fixes.at(-1) ?? null, withoutFix: advisories.length - fixes.length };
+    return { dependency: f.dependency, advisories, highest: advisories[0].severity, fixed: fixes.at(-1) ?? null, withoutFix: advisories.length - fixes.length, ...(f.via && { via: f.via }) };
   }).sort((a, b) => severityRank[b.highest] - severityRank[a.highest] || b.advisories.length - a.advisories.length || a.dependency.name.localeCompare(b.dependency.name));
 }
 

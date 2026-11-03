@@ -1082,3 +1082,27 @@ test('パス直接入力のAPIでもホーム省略形を解決して探索と�
     } finally { await api.shutdownScans(); store.close(); }
   });
 });
+
+test('探索し直すと登録済みアプリの技術構成を新しい判定で更新し、入力した内容は残す', async () => {
+  await fixture(async (root, put) => {
+    await put('orders-api/template.yaml', 'AWSTemplateFormatVersion: "2010-09-09"\nTransform: AWS::Serverless-2016-10-31\nResources:\n  Fn:\n    Type: AWS::Serverless::Function\n');
+    const store = new Store(':memory:');
+    try {
+      const { call } = client(store); await call('/session');
+      // Registered under an older rule that only knew Lambda declarations.
+      const path = join(root, 'orders-api');
+      const [id] = store.import('old', [{ ...candidate(path), name: 'orders-api', technologies: ['AWS Lambda設定'], fingerprint: 'older' }]).projectIds;
+      const before = store.project(id);
+      store.edit(id, { revision: before.revision, name: '受注API', purpose: '受注の受付', tags: ['仕事'], notes: '', lifecycle: 'maintained', archiveReason: '' });
+      let scan: Scan = (await call('/scans', { root })).data.scan;
+      for (let attempt = 0; attempt < 100 && scan.status === 'running'; attempt++) {
+        await new Promise(resolve => setTimeout(resolve, 10)); scan = (await call(`/scans/${scan.id}`)).data.scan;
+      }
+      await new Promise(resolve => setTimeout(resolve, 20));
+      const after = store.project(id);
+      assert.deepEqual(after.technologies.sort(), ['AWS Lambda設定', 'AWS SAM']);
+      assert.notEqual(after.fingerprint, 'older');
+      assert.deepEqual([after.name, after.purpose, after.tags, after.lifecycle, after.revision], ['受注API', '受注の受付', ['仕事'], 'maintained', before.revision + 1], 'what the user entered stays, and an open edit can still save');
+    } finally { store.close(); }
+  });
+});

@@ -7,7 +7,7 @@ import { setImmediate as nextTurn } from 'node:timers/promises';
 import type { Candidate, Component, Evidence, Scan, ScanIssue } from '../shared/types.js';
 import type { ScanCandidate, ScanFilter, ScanJobState, ScanPageOptions, ScanSelectOptions } from '../shared/scan-jobs.js';
 import { CatalogError } from './store.js';
-import { excluded, inspect, isExcluded, known, lockNames, memberMatch, skippedChildren, within, wordpressContent, type NodeInfo } from './scanner.js';
+import { excluded, extraNames, inspect, isExcluded, known, lockNames, markerFolders, memberMatch, skippedChildren, within, wordpressContent, type NodeInfo } from './scanner.js';
 
 // A resumable scan kept in the database instead of memory. Folders wait in a queue, the subfolders found while a folder is
 // listed are staged and committed in batches. A large folder interrupted halfway is re-listed, deduplicating saved child
@@ -41,7 +41,7 @@ type Stop = 'pause' | 'cancel' | null;
 
 // Names that a folder's own detection reads. Anything else is only counted, so a folder of a million files needs no name list.
 const markers = new Set(['.git', 'wp-includes', 'wp-content', 'themes', 'plugins']);
-const relevant = (name: string) => markers.has(name) || known.test(name) || lockNames.test(name) || /\.(csproj|tf|tf\.json)$/.test(name) || name.endsWith('.dist-info');
+const relevant = (name: string) => markers.has(name) || markerFolders.has(name) || known.test(name) || lockNames.test(name) || extraNames.test(name) || name.endsWith('.dist-info');
 // skippedChildren returns every name it was given when all subfolders are skipped. This marker shows that it did.
 const ALL = '\0all';
 const PAGE_ARRAY = 200;
@@ -223,6 +223,12 @@ export class ScanJobs {
     }
     delete candidate.componentTotal; delete candidate.evidenceTotal;
     return withRegistration(candidate, row);
+  }
+
+  /** Candidates at paths that are already registered, read in full. */
+  registeredCandidates(scanId: string): Candidate[] {
+    const ids = this.db.prepare('SELECT c.id FROM scan_job_candidates c WHERE c.scan_id=? AND EXISTS (SELECT 1 FROM projects p WHERE p.path = c.path)').all(scanId) as { id: string }[];
+    return ids.map(row => this.candidate(scanId, row.id)).filter((c): c is Candidate => !!c && !c.incomplete);
   }
 
   /** Ids of the candidates matching the filters, in page order, for selecting all of them at once. */

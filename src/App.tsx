@@ -6,11 +6,12 @@ import { HomeView } from './HomeView';
 import { UsageGuide } from './UsageGuide';
 import { FolderPathDialog } from './FolderPathDialog';
 import type { ScanCandidate } from '../shared/scan-jobs';
+import { ImagePanel, ScannerSettings } from './ScannerPanels';
 import { GuardPanel } from './GuardPanel';
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { House, Archive, ArrowLeft, ArrowRight, Check, ChevronDown, ChevronLeft, ClipboardCheck, Copy, ChevronRight, CircleAlert, ClipboardList, EyeOff, FileCode2, Folder, FolderMinus, GitBranch, Globe, FolderOpen, FolderSearch, FolderTree, FolderX, Layers, ListChecks, Package, PackageSearch, RefreshCw, LayoutList, Plus, Search, Settings, ShieldAlert, ShieldCheck, ShieldQuestion, SquareCode, SquareTerminal, Tag, X } from 'lucide-react';
 import { connect, request } from './api';
-import { appRoleLabels, ecosystemLabels, exposureLabels, lifecycleLabels, priorityLabels, responseLabels, type AppRole, type Exposure, type GitObservation, type GitStatus, type QueueItem, type ResponseStatus, type Candidate, type Dependency, type DependencySnapshot, type DependencyStatus, type Ecosystem, type Severity, type VulnerabilityCheck, type VulnerabilityFinding, type VulnerabilitySummary, type Lifecycle, type OpenApps, type Project, type ProjectEdit, type Scan } from '../shared/types';
+import { appRoleLabels, ecosystemLabel, ecosystemLabels, exposureLabels, lifecycleLabels, priorityLabels, responseLabels, type AppRole, type FindingVia, type Exposure, type GitObservation, type GitStatus, type QueueItem, type ResponseStatus, type Candidate, type Dependency, type DependencySnapshot, type DependencyStatus, type Ecosystem, type Severity, type VulnerabilityCheck, type VulnerabilityFinding, type VulnerabilitySummary, type Lifecycle, type OpenApps, type Project, type ProjectEdit, type Scan } from '../shared/types';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -546,7 +547,7 @@ function CatalogTree({ projects, selected, setSelected, filtered = false, startO
 function DependencyLine({ dependency }: { dependency: Dependency }) {
   return <div className={cn('text-caption', wrap)}>
     <code className="font-medium text-foreground">{dependency.name}@{dependency.version ?? '版不明'}</code>
-    <span className="ml-2 text-muted-foreground">{[ecosystemLabels[dependency.ecosystem], dependency.direct ? `直接${dependency.requested ? `（${dependency.requested}）` : ''}` : '間接', scopeLabels[dependency.scope], sourceLabel(dependency)].join(' · ')}</span>
+    <span className="ml-2 text-muted-foreground">{[ecosystemLabel(dependency.ecosystem), dependency.direct ? `直接${dependency.requested ? `（${dependency.requested}）` : ''}` : '間接', scopeLabels[dependency.scope], sourceLabel(dependency)].join(' · ')}</span>
     <code className="block text-micro text-muted-foreground">{dependency.file}{dependency.component && dependency.component !== dependency.file.replace(/\/[^/]+$/, '') ? ` → ${dependency.component}` : ''}</code>
   </div>;
 }
@@ -1525,13 +1526,17 @@ function SettingsView({ apps, changed, toDiscover }: { apps: OpenApps; changed: 
     <UsageGuide />
     <section className="mb-8 border-y py-5"><h2 className="mb-2 text-sm font-semibold">探索・除外フォルダ</h2><p className="mb-3 text-caption text-muted-foreground">探す範囲と、今後は探さないフォルダを管理します。登録済みアプリの整理とは別の設定です。</p><Button onClick={toDiscover} variant="outline" size="sm">探索・除外フォルダを管理</Button></section>
     <OpenAppSettings apps={apps} changed={changed} />
+    <ScannerSettings />
   </>;
 }
 
 type VulnerabilityData = { check: VulnerabilityCheck | null; summary: VulnerabilitySummary | null };
 // The right column keeps a fixed-height summary so the records below it stay in view; every advisory is in VulnerabilityList.
 const summaryGroups = 3;
-const dependencyLine = (dependency: Dependency) => <><code>{dependency.name}@{dependency.version}</code>（{dependency.direct ? '直接' : '間接'}・{scopeLabels[dependency.scope]}）</>;
+// osv-scanner reports no direct/indirect or scope, so its findings name the tool and where it looked instead.
+const dependencyLine = (dependency: Dependency, via?: FindingVia) => <><code>{dependency.name}@{dependency.version}</code>{via
+  ? `（${ecosystemLabel(dependency.ecosystem)}・osv-scanner: ${via.image ? `イメージ ${via.image}` : via.file}）`
+  : `（${dependency.direct ? '直接' : '間接'}・${scopeLabels[dependency.scope]}）`}</>;
 const fixLine = (group: FindingGroup) => group.fixed ? <>修正版 <code className="text-foreground">{group.fixed}</code>{group.withoutFix ? `（${group.withoutFix}件は修正版の情報なし）` : ''}</> : group.advisories.some(a => a.detailsAvailable) ? '修正版の情報なし' : '詳細を取得できませんでした';
 
 function VulnerabilityPanel({ project, data, check, showList, panelText, error, retry }: { project: Project; data: VulnerabilityData | null; check: () => void; showList: () => void; panelText: string; error?: string; retry?: () => void }) {
@@ -1590,7 +1595,7 @@ function VulnerabilityList({ id, findings }: { id: string; findings: Vulnerabili
     <h2 id={`${id}-heading`} tabIndex={-1} className="mb-2 text-base font-semibold outline-none">既知の脆弱性の詳細<span className="ml-2 text-sm font-normal text-muted-foreground tabular-nums">{count}件・{groups.length}個の依存</span></h2>
     <p className="mb-6 text-caption text-muted-foreground">依存の版ごとに、重大度の高い順。修正版はアドバイザリに記載された情報です。</p>
     {groups.map(group => <div key={`${group.dependency.ecosystem}:${group.dependency.name}@${group.dependency.version}`} className={cn('border-t py-4 text-caption', wrap)}>
-      <h3 className="flex flex-wrap items-baseline gap-x-2 text-xs font-semibold"><span className={severityTone(group.highest)}>{severityLabels[group.highest]}</span><span className="font-normal text-muted-foreground">{dependencyLine(group.dependency)}→ {fixLine(group)}</span></h3>
+      <h3 className="flex flex-wrap items-baseline gap-x-2 text-xs font-semibold"><span className={severityTone(group.highest)}>{severityLabels[group.highest]}</span><span className="font-normal text-muted-foreground">{dependencyLine(group.dependency, group.via)}→ {fixLine(group)}</span></h3>
       <ul className="mt-3 grid gap-3 pl-4">{group.advisories.map(a => <li key={a.id}>
         <div className="flex flex-wrap items-baseline gap-x-2"><span className={cn('font-semibold', severityTone(a.severity))}>{severityLabels[a.severity]}</span>
           <a href={`https://osv.dev/vulnerability/${encodeURIComponent(a.id)}`} target="_blank" rel="noreferrer" className="font-mono text-foreground">{a.id}</a>
@@ -1606,12 +1611,14 @@ function VulnerabilityList({ id, findings }: { id: string; findings: Vulnerabili
 }
 
 type Preview = { destination: string; projects: number; notRead: string[]; reread: string[]; packageVersions: number; byEcosystem: Partial<Record<Ecosystem, number>>; notSent: Record<string, number>;
-  nothingToSend: { name: string; reason: 'no-lock' | 'failed' | 'no-sendable' }[] };
+  nothingToSend: { name: string; reason: 'no-lock' | 'failed' | 'no-sendable' }[];
+  /** What osv-scanner will read and query, when it is turned on and found. */
+  scanner: { formats: Record<string, number>; images: { project: string; image: string }[] } | null };
 const nothingToSendLabels = { 'no-lock': '対応しているlockがありません', failed: 'lockを読み取れませんでした', 'no-sendable': '照会できる依存がありません（Git・ローカルなど）' };
 type CheckOutcome = { results: { id: string; name: string; status: string; count: number }[]; queried: number; failed: number };
-type VulnerabilityJob = { id: string; status: 'running' | 'done' | 'failed'; phase: 'reading' | 'querying' | 'details'; done: number; total: number;
+type VulnerabilityJob = { id: string; status: 'running' | 'done' | 'failed'; phase: 'reading' | 'querying' | 'details' | 'scanner'; done: number; total: number;
   projects: number; read: number; result?: CheckOutcome; error?: string };
-const jobPhaseLabels = { reading: '依存を読み取り中', querying: 'OSVに照会中（パッケージの版）', details: 'アドバイザリの詳細を取得中' };
+const jobPhaseLabels = { reading: '依存を読み取り中', querying: 'OSVに照会中（パッケージの版）', details: 'アドバイザリの詳細を取得中', scanner: 'osv-scannerで照会中（lockファイル・イメージ）' };
 const checkStatusLabels: Record<string, string> = { complete: '判定済み', partial: '一部のみ判定', failed: '照会失敗', 'kept-previous': '前回の結果を維持', 'not-read': 'フォルダなし・未読み取り', 'nothing-to-check': '判定できる依存なし（lockなし等）' };
 
 // Shows exactly what will leave this Mac before anything is sent.
@@ -1628,14 +1635,20 @@ function VulnerabilityDialog({ ids, label, close, started }: { ids: string[]; la
   }
   const notSent = preview ? Object.entries(preview.notSent).filter(([, n]) => n > 0) : [];
   const byEcosystem = preview ? Object.entries(preview.byEcosystem ?? {}).filter(([, n]) => n > 0) as [Ecosystem, number][] : [];
+  const scannerFormats = preview?.scanner ? Object.entries(preview.scanner.formats) : [];
+  const scannerImages = preview?.scanner?.images ?? [];
+  const anything = !!preview && (preview.packageVersions > 0 || preview.notRead.length > 0 || preview.reread.length > 0 || scannerFormats.length > 0 || scannerImages.length > 0);
   return <Dialog open onOpenChange={open => { if (!open && !busy) close(); }}>
     <DialogContent>
-      <DialogHeader><DialogTitle>既知の脆弱性を照会</DialogTitle><DialogDescription>{label ?? `選んだ${ids.length}件`}の依存（npm・Composer・Python・Rust）を、OSVのデータベースに照会します。</DialogDescription></DialogHeader>
+      <DialogHeader><DialogTitle>既知の脆弱性を照会</DialogTitle><DialogDescription>{label ?? `選んだ${ids.length}件`}の依存を、OSVのデータベースに照会します。</DialogDescription></DialogHeader>
       {!preview ? <p className="mb-4 text-xs text-muted-foreground">{error || '送る内容を確認しています。'}</p> : <dl className="mb-4 grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 rounded-md border bg-raised p-4 text-xs">
         <dt className="text-muted-foreground">送信先</dt><dd><code>{preview.destination}</code>（Googleが運営するOSV）</dd>
         <dt className="text-muted-foreground">送る内容</dt><dd className="tabular-nums">ecosystem・パッケージ名・版 <strong>{preview.packageVersions.toLocaleString()}種類</strong>（読み取り済みの{preview.projects}件から重複を除いて{byEcosystem.length > 0 && `。${byEcosystem.map(([e, n]) => `${ecosystemLabels[e]} ${n.toLocaleString()}`).join('・')}`}）{preview.notRead.length > 0 && '。下の未読み取りの分が加わります'}</dd>
         <dt className="text-muted-foreground">送らないもの</dt><dd>フォルダのパス、アプリ名、ソース、lockファイル{notSent.length ? `、${notSent.map(([r, n]) => `${notSentLabels[r] || r}の依存${n}件`).join('、')}` : ''}
           {preview.notSent.unknown > 0 && <span className="mt-1 block text-muted-foreground">取得元不明の依存は、「依存情報を読む」で読み直すと照会できる場合があります（lockに取得元が書かれていない版を、設定済みのレジストリのものとして扱うようにしたため）</span>}</dd>
+        {(scannerFormats.length > 0 || scannerImages.length > 0) && <><dt className="text-muted-foreground">osv-scanner</dt><dd className={wrap}>
+          {[...scannerFormats.map(([format, n]) => `${format} ${n}件`), ...(scannerImages.length ? [`イメージ ${scannerImages.length}件（${scannerImages.slice(0, 3).map(i => i.image).join('、')}${scannerImages.length > 3 ? ' ほか' : ''}）`] : [])].join('、')}
+          <span className="mt-1 block text-muted-foreground">owndappが読めない形式とイメージは、この端末のosv-scannerが読み取り、パッケージ名・版を同じ送信先に照会します。件数は照会後にわかります。イメージは一時フォルダに書き出し、終わったら削除します。手元にないイメージは取得しません</span></dd></>}
         {preview.notRead.length > 0 && <><dt className="text-muted-foreground">先に読み取り</dt><dd className={wrap}>依存を読み取っていない{preview.notRead.length}件（{preview.notRead.slice(0, 3).join('、')}{preview.notRead.length > 3 ? ' ほか' : ''}）は、照会の前にこの端末で読み取ります</dd></>}
         {preview.reread.length > 0 && <><dt className="text-muted-foreground">読み直し</dt><dd className={wrap}>前回lockがなかった・一部しか読めなかった{preview.reread.length}件（{preview.reread.slice(0, 3).join('、')}{preview.reread.length > 3 ? ' ほか' : ''}）は、照会の前に読み直します</dd></>}
         <dt className="text-muted-foreground">進め方</dt><dd>裏側で進め、画面上部に進み具合を出します。照会前に毎回、対象の依存情報を読み直します。表示の種類数は保存済み情報による目安で、読み直し後に変わる場合があります。OSVが混み合っているときは待って再試行します</dd>
@@ -1644,7 +1657,7 @@ function VulnerabilityDialog({ ids, label, close, started }: { ids: string[]; la
       </dl>}
       {error && preview && <p role="alert" className="mb-4 rounded-md bg-error-subtle p-3 text-xs text-error">{error}</p>}
       <DialogFooter><Button type="button" disabled={busy} onClick={close}>キャンセル</Button>
-        <Button variant="default" disabled={busy || !preview || (!preview.packageVersions && !preview.notRead.length && !preview.reread.length)} onClick={() => void run()}>{busy ? '開始中…' : !preview ? '確認中…' : preview.packageVersions || preview.notRead.length || preview.reread.length ? `${ids.length.toLocaleString()}件を照会` : '照会できる依存がありません'}</Button></DialogFooter>
+        <Button variant="default" disabled={busy || !anything} onClick={() => void run()}>{busy ? '開始中…' : !preview ? '確認中…' : anything ? `${ids.length.toLocaleString()}件を照会` : '照会できる依存がありません'}</Button></DialogFooter>
     </DialogContent>
   </Dialog>;
 }
@@ -1983,6 +1996,7 @@ function ProjectDetail({ project, checkVulnerabilities, reloadProjects, apps, op
           <details className="mt-3 text-caption text-dim"><summary className="min-h-8 py-1.5">検出の根拠を確認</summary><Evidence items={project.evidence} /></details>
         </section>
         <DependencyPanel project={project} reloadProjects={reloadProjects} className={recordSection} headingClassName={recordHeading} />
+        <ImagePanel project={project} reloadProjects={reloadProjects} className={recordSection} headingClassName={recordHeading} />
         <GuardPanel projectId={project.id} className={recordSection} headingClassName={recordHeading} />
         <GitPanel project={project} reloadProjects={reloadProjects} className={recordSection} headingClassName={recordHeading} />
         <section className={recordSection}><h2 className={recordHeading}><ClipboardList size={16} />整理の履歴</h2>{history.length ? <ul className="m-0 list-none p-0">{history.map((item, i) => <li key={i} className="mb-2 flex justify-between gap-3 text-caption"><span>{item.action === 'registered' ? 'カタログに登録' : item.action === 'tags_added' ? 'タグを追加' : item.action === 'lifecycle_changed' ? '管理状態を変更' : item.action === 'dependencies_read' ? '依存情報を読み取り' : item.action === 'git_read' ? 'Git情報を読み取り' : item.action === 'vulnerabilities_checked' ? '脆弱性を照会' : item.action === 'purpose_filled' ? '用途を自動入力' : item.action === 'exposure_changed' ? '公開状況を変更' : '情報を編集'}</span><time className="whitespace-nowrap text-muted-foreground" dateTime={item.createdAt}>{date(item.createdAt)}</time></li>)}</ul> : <p className="text-muted-foreground">履歴を読み込んでいます。</p>}</section>
